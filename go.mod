@@ -2,7 +2,10 @@ module github.com/zuhailkhan/threadman
 
 go 1.26.2
 
-require entgo.io/ent v0.14.6
+require (
+	entgo.io/ent v0.14.6
+	github.com/mattn/go-sqlite3 v1.14.44
+)
 
 require (
 	ariga.io/atlas v0.36.2-0.20250730182955-2c6300d0a3e1 // indirect
@@ -13,7 +16,6 @@ require (
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/hashicorp/hcl/v2 v2.18.1 // indirect
-	github.com/mattn/go-sqlite3 v1.14.44 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/zclconf/go-cty v1.14.4 // indirect
