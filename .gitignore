@@ -1,0 +1,6 @@
+commit-context/
+*.db
+*.db-journal
+bin/
+dist/
+vendor/
