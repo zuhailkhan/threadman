@@ -112,11 +112,18 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 	}
 	defer file.Close()
 
-	var messages []domain.Message
 	scanner := bufio.NewScanner(file)
-
 	if scanner.Scan() {
 	}
+
+	// Gemini streams partial updates: the same message ID can appear multiple
+	// times with growing content. We keep the last occurrence per ID.
+	type msgEntry struct {
+		msg   domain.Message
+		order int
+	}
+	seen := make(map[string]msgEntry)
+	order := 0
 
 	for scanner.Scan() {
 		var entry logEntry
@@ -153,12 +160,23 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 
 		ts, _ := time.Parse(time.RFC3339, entry.Timestamp)
 
-		messages = append(messages, domain.Message{
+		e, exists := seen[entry.ID]
+		if !exists {
+			e.order = order
+			order++
+		}
+		e.msg = domain.Message{
 			ID:        entry.ID,
 			Role:      role,
 			Content:   content,
 			Timestamp: ts,
-		})
+		}
+		seen[entry.ID] = e
+	}
+
+	messages := make([]domain.Message, len(seen))
+	for _, e := range seen {
+		messages[e.order] = e.msg
 	}
 
 	t.Messages = messages

@@ -113,9 +113,10 @@ func (p *Provider) parseMetadata(path string) (domain.Thread, error) {
 	}
 	defer file.Close()
 
+	sessionID := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 	var (
-		sessionID     string
 		title         string
+		firstMsg      string
 		workspacePath string
 		createdAt     time.Time
 		lastSyncedAt  time.Time
@@ -146,8 +147,15 @@ func (p *Provider) parseMetadata(path string) (domain.Thread, error) {
 		case "user":
 			var e userEntry
 			if err := json.Unmarshal(line, &e); err == nil {
-				if workspacePath == "" && !e.IsMeta && e.CWD != "" {
-					workspacePath = e.CWD
+				if !e.IsMeta {
+					if workspacePath == "" && e.CWD != "" {
+						workspacePath = e.CWD
+					}
+					if firstMsg == "" {
+						if c := extractUserContent(e.Message.Content); c != "" && !strings.HasPrefix(c, "<") {
+							firstMsg = c
+						}
+					}
 				}
 				trackTimestamp(e.Timestamp, &createdAt, &lastSyncedAt)
 			}
@@ -164,8 +172,8 @@ func (p *Provider) parseMetadata(path string) (domain.Thread, error) {
 		}
 	}
 
-	if sessionID == "" {
-		return domain.Thread{}, fmt.Errorf("no sessionId in %s", path)
+	if title == "" {
+		title = truncate(firstMsg, 50)
 	}
 
 	return domain.Thread{
@@ -187,7 +195,12 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 	}
 	defer file.Close()
 
-	var messages []domain.Message
+	type msgEntry struct {
+		msg   domain.Message
+		order int
+	}
+	seen := make(map[string]msgEntry)
+	order := 0
 
 	scanner := newScanner(file)
 	for scanner.Scan() {
@@ -198,6 +211,7 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 			continue
 		}
 
+		var msg domain.Message
 		switch base.Type {
 		case "user":
 			var e userEntry
@@ -209,12 +223,7 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 				continue
 			}
 			ts, _ := time.Parse(time.RFC3339, e.Timestamp)
-			messages = append(messages, domain.Message{
-				ID:        e.UUID,
-				Role:      domain.RoleUser,
-				Content:   content,
-				Timestamp: ts,
-			})
+			msg = domain.Message{ID: e.UUID, Role: domain.RoleUser, Content: content, Timestamp: ts}
 
 		case "assistant":
 			var e assistantEntry
@@ -226,13 +235,24 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 				continue
 			}
 			ts, _ := time.Parse(time.RFC3339, e.Timestamp)
-			messages = append(messages, domain.Message{
-				ID:        e.Message.ID,
-				Role:      domain.RoleAssistant,
-				Content:   content,
-				Timestamp: ts,
-			})
+			msg = domain.Message{ID: e.Message.ID, Role: domain.RoleAssistant, Content: content, Timestamp: ts}
+
+		default:
+			continue
 		}
+
+		e, exists := seen[msg.ID]
+		if !exists {
+			e.order = order
+			order++
+		}
+		e.msg = msg
+		seen[msg.ID] = e
+	}
+
+	messages := make([]domain.Message, len(seen))
+	for _, e := range seen {
+		messages[e.order] = e.msg
 	}
 
 	t.Messages = messages
@@ -284,4 +304,12 @@ func newScanner(f *os.File) *bufio.Scanner {
 	s := bufio.NewScanner(f)
 	s.Buffer(make([]byte, 2*1024*1024), 2*1024*1024)
 	return s
+}
+
+func truncate(s string, n int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-3] + "..."
 }

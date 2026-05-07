@@ -20,3 +20,8 @@ type ThreadRepository interface {
 
 	SearchMessages(ctx context.Context, query string) ([]domain.Thread, error)
 }
+
+type ThreadInjector interface {
+	InjectThread(ctx context.Context, thread domain.Thread) (domain.Thread, error)
+}
+
