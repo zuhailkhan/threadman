@@ -4,3 +4,4 @@ commit-context/
 bin/
 dist/
 vendor/
+.openclaude-profile.json
