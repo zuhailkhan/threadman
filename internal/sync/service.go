@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/zuhailkhan/threadman/internal/domain"
@@ -12,6 +13,8 @@ type SyncResult struct {
 	Provider     string
 	ThreadsFound int
 	ThreadsSaved int
+	Skipped      int
+	Errors       []string
 	Err          error
 }
 
@@ -41,10 +44,16 @@ func (s *Service) SyncAll(ctx context.Context) []SyncResult {
 		for _, t := range threads {
 			full, err := p.GetThreadDetails(ctx, t)
 			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", t.OriginalID, err))
+				continue
+			}
+			if !hasUserMessage(full.Messages) {
+				result.Skipped++
 				continue
 			}
 			full.LastSyncedAt = time.Now()
 			if err := s.repo.UpsertThread(ctx, full); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("save %s: %v", t.OriginalID, err))
 				continue
 			}
 			result.ThreadsSaved++
@@ -70,8 +79,35 @@ func (s *Service) SyncProvider(ctx context.Context, name string) (SyncResult, bo
 	return SyncResult{}, false
 }
 
+func hasUserMessage(messages []domain.Message) bool {
+	for _, m := range messages {
+		if m.Role == domain.RoleUser {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) ListThreads(ctx context.Context, provider string) ([]domain.Thread, error) {
 	return s.repo.ListThreads(ctx, provider)
+}
+
+func (s *Service) GetThread(ctx context.Context, id string) (domain.Thread, error) {
+	threads, err := s.repo.ListThreads(ctx, "")
+	if err != nil {
+		return domain.Thread{}, err
+	}
+	for _, t := range threads {
+		if t.ID == id {
+			for _, p := range s.providers {
+				if p.Name() == t.Provider {
+					return p.GetThreadDetails(ctx, t)
+				}
+			}
+			return t, nil
+		}
+	}
+	return domain.Thread{}, fmt.Errorf("thread not found: %s", id)
 }
 
 func (s *Service) SearchMessages(ctx context.Context, query string) ([]domain.Thread, error) {

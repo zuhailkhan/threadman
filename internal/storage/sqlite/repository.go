@@ -63,7 +63,7 @@ func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
 	builders := make([]*ent.MessageCreate, len(t.Messages))
 	for i, m := range t.Messages {
 		builders[i] = tx.Message.Create().
-			SetID(m.ID).
+			SetID(t.ID+":"+m.ID).
 			SetRole(string(m.Role)).
 			SetContent(m.Content).
 			SetTimestamp(m.Timestamp).
