@@ -68,6 +68,10 @@ type aiTitleEntry struct {
 	AITitle string `json:"aiTitle"`
 }
 
+type customTitleEntry struct {
+	CustomTitle string `json:"customTitle"`
+}
+
 type timestampEntry struct {
 	Timestamp string `json:"timestamp"`
 }
@@ -115,7 +119,8 @@ func (p *Provider) parseMetadata(path string) (domain.Thread, error) {
 
 	sessionID := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 	var (
-		title         string
+		customTitle   string
+		aiTitle       string
 		firstMsg      string
 		workspacePath string
 		createdAt     time.Time
@@ -138,10 +143,16 @@ func (p *Provider) parseMetadata(path string) (domain.Thread, error) {
 				sessionID = e.SessionID
 			}
 
+		case "custom-title":
+			var e customTitleEntry
+			if err := json.Unmarshal(line, &e); err == nil && e.CustomTitle != "" {
+				customTitle = e.CustomTitle
+			}
+
 		case "ai-title":
 			var e aiTitleEntry
 			if err := json.Unmarshal(line, &e); err == nil {
-				title = e.AITitle
+				aiTitle = e.AITitle
 			}
 
 		case "user":
@@ -172,6 +183,10 @@ func (p *Provider) parseMetadata(path string) (domain.Thread, error) {
 		}
 	}
 
+	title := customTitle
+	if title == "" {
+		title = aiTitle
+	}
 	if title == "" {
 		title = truncate(firstMsg, 50)
 	}
