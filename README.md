@@ -9,6 +9,10 @@
 - **Thread reader** — scrollable message view with You/Assistant labels
 - **CLI subcommands** — `sync`, `list`, `search` for scripting
 
+
+<img width="1920" height="1045" alt="image" src="https://github.com/user-attachments/assets/94d4fbc4-be9c-40f6-bb5a-56d487347d17" />
+
+
 ## Supported Providers
 
 | Provider | Source |
