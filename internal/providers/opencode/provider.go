@@ -12,6 +12,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/zuhailkhan/threadman/internal/domain"
+	"github.com/zuhailkhan/threadman/internal/ports"
 )
 
 type Provider struct {
@@ -75,6 +76,43 @@ func (p *Provider) DiscoverThreads(ctx context.Context) ([]domain.Thread, error)
 	}
 
 	return threads, rows.Err()
+}
+
+func (p *Provider) IngestFromHook(ctx context.Context, payload ports.HookPayload) (domain.Thread, error) {
+	if payload.SessionID == "" {
+		return domain.Thread{}, fmt.Errorf("opencode hook payload missing session_id")
+	}
+	db, err := p.openDB()
+	if err != nil {
+		return domain.Thread{}, err
+	}
+	defer db.Close()
+
+	var (
+		title         string
+		directory     string
+		timeCreatedMs int64
+		timeUpdatedMs int64
+	)
+	err = db.QueryRowContext(ctx,
+		`SELECT title, directory, time_created, time_updated FROM session WHERE id = ?`,
+		payload.SessionID,
+	).Scan(&title, &directory, &timeCreatedMs, &timeUpdatedMs)
+	if err != nil {
+		return domain.Thread{}, fmt.Errorf("session not found: %w", err)
+	}
+
+	t := domain.Thread{
+		ID:             fmt.Sprintf("opencode-%s", payload.SessionID),
+		Provider:       "opencode",
+		OriginalID:     payload.SessionID,
+		Title:          title,
+		WorkspacePath:  directory,
+		SourceFilePath: p.dbPath,
+		CreatedAt:      time.UnixMilli(timeCreatedMs),
+		LastSyncedAt:   time.UnixMilli(timeUpdatedMs),
+	}
+	return p.GetThreadDetails(ctx, t)
 }
 
 func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domain.Thread, error) {

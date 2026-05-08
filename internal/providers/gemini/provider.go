@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zuhailkhan/threadman/internal/domain"
+	"github.com/zuhailkhan/threadman/internal/ports"
 )
 
 type Provider struct {
@@ -103,6 +104,18 @@ func (p *Provider) parseMetadata(path string, projectName string) (domain.Thread
 		CreatedAt:      meta.StartTime,
 		LastSyncedAt:   meta.LastUpdated,
 	}, nil
+}
+
+func (p *Provider) IngestFromHook(ctx context.Context, payload ports.HookPayload) (domain.Thread, error) {
+	if payload.TranscriptPath == "" {
+		return domain.Thread{}, fmt.Errorf("gemini hook payload missing transcript_path")
+	}
+	projectName := filepath.Base(filepath.Dir(filepath.Dir(payload.TranscriptPath)))
+	t, err := p.parseMetadata(payload.TranscriptPath, projectName)
+	if err != nil {
+		return domain.Thread{}, err
+	}
+	return p.GetThreadDetails(ctx, t)
 }
 
 func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domain.Thread, error) {
