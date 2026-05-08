@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/fsnotify/fsnotify"
 	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/hooks"
 	syncsvc "github.com/zuhailkhan/threadman/internal/sync"
@@ -33,12 +34,16 @@ type onboardingProvider struct {
 
 type syncDoneMsg struct{ results []syncsvc.SyncResult }
 type threadLoadedMsg struct{ thread domain.Thread }
+type threadRefreshedMsg struct{ thread domain.Thread }
+type backgroundThreadsMsg []domain.Thread
 type hookSetupDoneMsg struct{ errs []error }
+type dbChangedMsg struct{}
 type errMsg struct{ err error }
 type countMsg int
 
 type Model struct {
 	svc                 *syncsvc.Service
+	dbChanges           <-chan struct{}
 	threads             []domain.Thread
 	filtered            []domain.Thread
 	cursor              int
@@ -59,7 +64,7 @@ var providerLabels = map[string]string{
 	"opencode": "OpenCode",
 }
 
-func New(svc *syncsvc.Service) Model {
+func New(svc *syncsvc.Service, dbPath string) Model {
 	providers := make([]onboardingProvider, 0)
 	for _, name := range svc.ProviderNames() {
 		label := providerLabels[name]
@@ -68,11 +73,52 @@ func New(svc *syncsvc.Service) Model {
 		}
 		providers = append(providers, onboardingProvider{name: name, label: label, selected: true})
 	}
-	return Model{svc: svc, onboardingProviders: providers}
+	ch := make(chan struct{}, 1)
+	go watchDB(dbPath, ch)
+	return Model{svc: svc, dbChanges: ch, onboardingProviders: providers}
+}
+
+func watchDB(path string, ch chan<- struct{}) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return
+	}
+	defer watcher.Close()
+
+	if err := watcher.Add(filepath.Dir(path)); err != nil {
+		return
+	}
+	base := filepath.Base(path)
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if filepath.Base(event.Name) == base &&
+				(event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) {
+				select {
+				case ch <- struct{}{}:
+				default:
+				}
+			}
+		case _, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+		}
+	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.checkFirstRun()
+	return tea.Batch(m.checkFirstRun(), waitForDBChange(m.dbChanges))
+}
+
+func waitForDBChange(ch <-chan struct{}) tea.Cmd {
+	return func() tea.Msg {
+		<-ch
+		return dbChangedMsg{}
+	}
 }
 
 func (m Model) checkFirstRun() tea.Cmd {
@@ -92,6 +138,27 @@ func (m Model) loadThreads() tea.Cmd {
 			return errMsg{err}
 		}
 		return threads
+	}
+}
+
+func (m Model) backgroundLoadThreads() tea.Cmd {
+	return func() tea.Msg {
+		threads, err := m.svc.ListThreads(context.Background(), "")
+		if err != nil {
+			return nil
+		}
+		return backgroundThreadsMsg(threads)
+	}
+}
+
+func (m Model) refreshCurrentThread() tea.Cmd {
+	id := m.thread.ID
+	return func() tea.Msg {
+		thread, err := m.svc.GetThread(context.Background(), id)
+		if err != nil {
+			return nil
+		}
+		return threadRefreshedMsg{thread}
 	}
 }
 
@@ -159,11 +226,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateList
 		return m, m.loadThreads()
 
+	case dbChangedMsg:
+		cmds := []tea.Cmd{waitForDBChange(m.dbChanges)}
+		switch m.state {
+		case stateList, stateSearch:
+			cmds = append(cmds, m.backgroundLoadThreads())
+		case stateThread:
+			cmds = append(cmds, m.refreshCurrentThread())
+		}
+		return m, tea.Batch(cmds...)
+
+	case backgroundThreadsMsg:
+		m.threads = []domain.Thread(msg)
+		m.applyFilter()
+
 	case threadLoadedMsg:
 		m.thread = msg.thread
 		m.state = stateThread
 		m.viewport.SetContent(renderThread(msg.thread))
-		m.viewport.GotoTop()
+		m.viewport.GotoBottom()
+
+	case threadRefreshedMsg:
+		if m.state == stateThread {
+			prevCount := len(m.thread.Messages)
+			m.thread = msg.thread
+			m.viewport.SetContent(renderThread(msg.thread))
+			if len(msg.thread.Messages) > prevCount {
+				m.viewport.GotoBottom()
+			}
+		}
+		return m, nil
 
 	case errMsg:
 		m.status = "error: " + msg.err.Error()
