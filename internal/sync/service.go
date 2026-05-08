@@ -9,6 +9,7 @@ import (
 	"github.com/zuhailkhan/threadman/internal/ports"
 )
 
+
 type SyncResult struct {
 	Provider     string
 	ThreadsFound int
@@ -124,4 +125,26 @@ func (s *Service) ProviderNames() []string {
 
 func (s *Service) CountThreads(ctx context.Context) (int, error) {
 	return s.repo.CountThreads(ctx)
+}
+
+func (s *Service) IngestFromHook(ctx context.Context, providerName string, payload ports.HookPayload) error {
+	for _, p := range s.providers {
+		if p.Name() != providerName {
+			continue
+		}
+		hi, ok := p.(ports.HookIngester)
+		if !ok {
+			return fmt.Errorf("provider %s does not support hook ingestion", providerName)
+		}
+		thread, err := hi.IngestFromHook(ctx, payload)
+		if err != nil {
+			return err
+		}
+		if !hasUserMessage(thread.Messages) {
+			return nil
+		}
+		thread.LastSyncedAt = time.Now()
+		return s.repo.UpsertThread(ctx, thread)
+	}
+	return fmt.Errorf("provider not found: %s", providerName)
 }

@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zuhailkhan/threadman/internal/domain"
+	"github.com/zuhailkhan/threadman/internal/hooks"
 	syncsvc "github.com/zuhailkhan/threadman/internal/sync"
 )
 
@@ -18,6 +19,7 @@ type appState int
 
 const (
 	stateOnboarding appState = iota
+	stateHookSetup
 	stateList
 	stateThread
 	stateSearch
@@ -31,6 +33,7 @@ type onboardingProvider struct {
 
 type syncDoneMsg struct{ results []syncsvc.SyncResult }
 type threadLoadedMsg struct{ thread domain.Thread }
+type hookSetupDoneMsg struct{ errs []error }
 type errMsg struct{ err error }
 type countMsg int
 
@@ -136,6 +139,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			parts = append(parts, fmt.Sprintf("[%s] %d synced", r.Provider, r.ThreadsSaved))
 		}
 		m.status = strings.Join(parts, "  ")
+		if m.state == stateOnboarding {
+			m.state = stateHookSetup
+			return m, nil
+		}
+		m.state = stateList
+		return m, m.loadThreads()
+
+	case hookSetupDoneMsg:
+		if len(msg.errs) == 0 {
+			m.status = "hooks configured for all providers"
+		} else {
+			msgs := make([]string, len(msg.errs))
+			for i, e := range msg.errs {
+				msgs[i] = e.Error()
+			}
+			m.status = "hook setup errors: " + strings.Join(msgs, "; ")
+		}
 		m.state = stateList
 		return m, m.loadThreads()
 
@@ -183,8 +203,24 @@ func (m Model) syncSelected() tea.Cmd {
 	}
 }
 
+func (m Model) setupHooksCmd() tea.Cmd {
+	return func() tea.Msg {
+		return hookSetupDoneMsg{errs: hooks.SetupAll()}
+	}
+}
+
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.state {
+	case stateHookSetup:
+		switch msg.String() {
+		case "enter", "y":
+			m.status = "configuring hooks..."
+			return m, m.setupHooksCmd()
+		case "esc", "n", "q":
+			m.state = stateList
+			return m, m.loadThreads()
+		}
+
 	case stateOnboarding:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -223,6 +259,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "s":
 			m.status = "syncing..."
 			return m, m.syncAll()
+		case "H":
+			m.status = "configuring hooks..."
+			return m, m.setupHooksCmd()
 		case "/":
 			m.state = stateSearch
 			m.query = ""
@@ -287,6 +326,8 @@ func (m Model) View() string {
 	switch m.state {
 	case stateOnboarding:
 		return m.viewOnboarding()
+	case stateHookSetup:
+		return m.viewHookSetup()
 	case stateThread:
 		return m.viewThread()
 	default:
@@ -327,12 +368,38 @@ func (m Model) viewOnboarding() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
 }
 
+func (m Model) viewHookSetup() string {
+	dialogWidth := 46
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString("  Set up auto-ingestion?\n")
+	inner.WriteString("\n")
+	inner.WriteString("  Ingest after every AI response:\n")
+	inner.WriteString("\n")
+	for _, p := range m.onboardingProviders {
+		inner.WriteString(fmt.Sprintf("    %s\n", p.label))
+	}
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  Enter / y  configure") + "\n")
+	inner.WriteString(styleHint.Render("  Esc / n    skip") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
 func (m Model) viewList() string {
 	var b strings.Builder
 
 	// header bar
 	title := styleTitle.Render("threadman")
-	hints := styleHint.Render("[s] sync  [/] search  [q] quit")
+	hints := styleHint.Render("[s] sync  [H] hooks  [/] search  [q] quit")
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(hints)
 	if gap < 1 {
 		gap = 1

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zuhailkhan/threadman/internal/domain"
+	"github.com/zuhailkhan/threadman/internal/ports"
 )
 
 type Provider struct {
@@ -313,6 +314,42 @@ func trackTimestamp(raw string, createdAt, lastSyncedAt *time.Time) {
 	if ts.After(*lastSyncedAt) {
 		*lastSyncedAt = ts
 	}
+}
+
+func (p *Provider) IngestFromHook(ctx context.Context, payload ports.HookPayload) (domain.Thread, error) {
+	path := payload.TranscriptPath
+	if path == "" {
+		if payload.SessionID == "" {
+			return domain.Thread{}, fmt.Errorf("hook payload missing transcript_path and session_id")
+		}
+		var err error
+		path, err = p.findSessionFile(payload.SessionID)
+		if err != nil {
+			return domain.Thread{}, err
+		}
+	}
+	t, err := p.parseMetadata(path)
+	if err != nil {
+		return domain.Thread{}, err
+	}
+	return p.GetThreadDetails(ctx, t)
+}
+
+func (p *Provider) findSessionFile(sessionID string) (string, error) {
+	dirs, err := os.ReadDir(p.baseDir)
+	if err != nil {
+		return "", fmt.Errorf("read claude projects dir: %w", err)
+	}
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(p.baseDir, d.Name(), sessionID+".jsonl")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("session file not found for session_id: %s", sessionID)
 }
 
 func newScanner(f *os.File) *bufio.Scanner {

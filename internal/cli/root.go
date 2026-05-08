@@ -13,6 +13,6 @@ func Execute(svc *syncsvc.Service, launchTUI func()) error {
 			launchTUI()
 		},
 	}
-	root.AddCommand(newSyncCmd(svc), newListCmd(svc), newSearchCmd(svc), newShowCmd(svc))
+	root.AddCommand(newSyncCmd(svc), newListCmd(svc), newSearchCmd(svc), newShowCmd(svc), newIngestCmd(svc), newSetupHooksCmd())
 	return root.Execute()
 }

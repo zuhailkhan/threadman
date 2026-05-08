@@ -27,3 +27,13 @@ type ThreadInjector interface {
 	InjectThread(ctx context.Context, thread domain.Thread) (domain.Thread, error)
 }
 
+type HookPayload struct {
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
+	CWD            string `json:"cwd"`
+}
+
+type HookIngester interface {
+	IngestFromHook(ctx context.Context, payload HookPayload) (domain.Thread, error)
+}
+
