@@ -99,6 +99,10 @@ func (r *Repository) ListThreads(ctx context.Context, provider string) ([]domain
 	return threads, nil
 }
 
+func (r *Repository) CountThreads(ctx context.Context) (int, error) {
+	return r.client.Thread.Query().Count(ctx)
+}
+
 func (r *Repository) SearchMessages(ctx context.Context, query string) ([]domain.Thread, error) {
 	entities, err := r.client.Thread.Query().
 		Where(thread.HasMessagesWith(message.ContentContains(query))).

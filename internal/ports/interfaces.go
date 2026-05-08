@@ -19,6 +19,8 @@ type ThreadRepository interface {
 	ListThreads(ctx context.Context, provider string) ([]domain.Thread, error)
 
 	SearchMessages(ctx context.Context, query string) ([]domain.Thread, error)
+
+	CountThreads(ctx context.Context) (int, error)
 }
 
 type ThreadInjector interface {
