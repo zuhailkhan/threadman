@@ -113,3 +113,15 @@ func (s *Service) GetThread(ctx context.Context, id string) (domain.Thread, erro
 func (s *Service) SearchMessages(ctx context.Context, query string) ([]domain.Thread, error) {
 	return s.repo.SearchMessages(ctx, query)
 }
+
+func (s *Service) ProviderNames() []string {
+	names := make([]string, len(s.providers))
+	for i, p := range s.providers {
+		names[i] = p.Name()
+	}
+	return names
+}
+
+func (s *Service) CountThreads(ctx context.Context) (int, error) {
+	return s.repo.CountThreads(ctx)
+}

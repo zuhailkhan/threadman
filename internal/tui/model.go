@@ -17,35 +17,69 @@ import (
 type appState int
 
 const (
-	stateList appState = iota
+	stateOnboarding appState = iota
+	stateList
 	stateThread
 	stateSearch
 )
 
+type onboardingProvider struct {
+	name     string
+	label    string
+	selected bool
+}
+
 type syncDoneMsg struct{ results []syncsvc.SyncResult }
 type threadLoadedMsg struct{ thread domain.Thread }
 type errMsg struct{ err error }
+type countMsg int
 
 type Model struct {
-	svc      *syncsvc.Service
-	threads  []domain.Thread
-	filtered []domain.Thread
-	cursor   int
-	state    appState
-	query    string
-	viewport viewport.Model
-	thread   domain.Thread
-	status   string
-	width    int
-	height   int
+	svc                 *syncsvc.Service
+	threads             []domain.Thread
+	filtered            []domain.Thread
+	cursor              int
+	state               appState
+	query               string
+	viewport            viewport.Model
+	thread              domain.Thread
+	status              string
+	width               int
+	height              int
+	onboardingProviders []onboardingProvider
+	onboardingCursor    int
+}
+
+var providerLabels = map[string]string{
+	"claude":   "Claude Code",
+	"gemini":   "Gemini CLI",
+	"opencode": "OpenCode",
 }
 
 func New(svc *syncsvc.Service) Model {
-	return Model{svc: svc}
+	providers := make([]onboardingProvider, 0)
+	for _, name := range svc.ProviderNames() {
+		label := providerLabels[name]
+		if label == "" {
+			label = name
+		}
+		providers = append(providers, onboardingProvider{name: name, label: label, selected: true})
+	}
+	return Model{svc: svc, onboardingProviders: providers}
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.loadThreads()
+	return m.checkFirstRun()
+}
+
+func (m Model) checkFirstRun() tea.Cmd {
+	return func() tea.Msg {
+		count, err := m.svc.CountThreads(context.Background())
+		if err != nil {
+			return errMsg{err}
+		}
+		return countMsg(count)
+	}
 }
 
 func (m Model) loadThreads() tea.Cmd {
@@ -83,6 +117,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.viewport = viewport.New(msg.Width, msg.Height-4)
 
+	case countMsg:
+		if msg == 0 {
+			m.state = stateOnboarding
+		} else {
+			m.state = stateList
+			return m, m.loadThreads()
+		}
+
 	case []domain.Thread:
 		m.threads = msg
 		m.applyFilter()
@@ -94,6 +136,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			parts = append(parts, fmt.Sprintf("[%s] %d synced", r.Provider, r.ThreadsSaved))
 		}
 		m.status = strings.Join(parts, "  ")
+		m.state = stateList
 		return m, m.loadThreads()
 
 	case threadLoadedMsg:
@@ -118,8 +161,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) syncSelected() tea.Cmd {
+	selected := make([]string, 0)
+	for _, p := range m.onboardingProviders {
+		if p.selected {
+			selected = append(selected, p.name)
+		}
+	}
+	return func() tea.Msg {
+		results := m.svc.SyncAll(context.Background())
+		filtered := results[:0]
+		for _, r := range results {
+			for _, name := range selected {
+				if r.Provider == name {
+					filtered = append(filtered, r)
+					break
+				}
+			}
+		}
+		return syncDoneMsg{filtered}
+	}
+}
+
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.state {
+	case stateOnboarding:
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "up", "k":
+			if m.onboardingCursor > 0 {
+				m.onboardingCursor--
+			}
+		case "down", "j":
+			if m.onboardingCursor < len(m.onboardingProviders)-1 {
+				m.onboardingCursor++
+			}
+		case " ":
+			m.onboardingProviders[m.onboardingCursor].selected = !m.onboardingProviders[m.onboardingCursor].selected
+		case "enter":
+			m.status = "importing..."
+			return m, m.syncSelected()
+		}
+
 	case stateList:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -201,11 +285,46 @@ func (m Model) View() string {
 		return "loading..."
 	}
 	switch m.state {
+	case stateOnboarding:
+		return m.viewOnboarding()
 	case stateThread:
 		return m.viewThread()
 	default:
 		return m.viewList()
 	}
+}
+
+func (m Model) viewOnboarding() string {
+	dialogWidth := 44
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString("  Welcome to threadman\n")
+	inner.WriteString("  Select providers to import from:\n")
+	inner.WriteString("\n")
+	for i, p := range m.onboardingProviders {
+		check := "✓"
+		if !p.selected {
+			check = " "
+		}
+		line := fmt.Sprintf("  [%s] %s", check, p.label)
+		if i == m.onboardingCursor {
+			line = styleCursor.Render("▶") + fmt.Sprintf(" [%s] %s", check, p.label)
+		}
+		inner.WriteString(line + "\n")
+	}
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  ↑↓ navigate  Space toggle") + "\n")
+	inner.WriteString(styleHint.Render("  Enter import  Q quit") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (m Model) viewList() string {
