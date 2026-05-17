@@ -2,7 +2,7 @@ package gemini
 
 import (
 	"context"
-	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -32,8 +32,12 @@ func TestGeminiWriterRoundTrip(t *testing.T) {
 		t.Fatal("expected non-empty sessionID")
 	}
 
-	encodedWS := url.PathEscape(thread.WorkspacePath)
-	filePath := filepath.Join(dir, encodedWS, "chats", sessionID+".jsonl")
+	chatsDir := filepath.Join(dir, filepath.Base(thread.WorkspacePath), "chats")
+	entries, err := os.ReadDir(chatsDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected 1 file in chats dir, got %v (err: %v)", len(entries), err)
+	}
+	filePath := filepath.Join(chatsDir, entries[0].Name())
 
 	stub := domain.Thread{SourceFilePath: filePath}
 	got, err := p.GetThreadDetails(context.Background(), stub)
@@ -62,11 +66,17 @@ func TestGeminiWriterOpenCommand(t *testing.T) {
 	dir := t.TempDir()
 	w := &Writer{baseDir: dir}
 
-	cmd := w.OpenCommand("any-id", "/home/user/proj")
+	cmd := w.OpenCommand("abc-uuid", "/home/user/proj")
 	if cmd.Dir != "/home/user/proj" {
 		t.Errorf("Dir: got %q, want %q", cmd.Dir, "/home/user/proj")
 	}
-	if cmd.Args[0] != "gemini" {
-		t.Errorf("Args[0]: got %q, want gemini", cmd.Args[0])
+	if len(cmd.Args) < 3 {
+		t.Fatalf("expected at least 3 args, got %v", cmd.Args)
+	}
+	if cmd.Args[1] != "--resume" {
+		t.Errorf("Args[1]: got %q, want --resume", cmd.Args[1])
+	}
+	if cmd.Args[2] != "abc-uuid" {
+		t.Errorf("Args[2]: got %q, want abc-uuid", cmd.Args[2])
 	}
 }

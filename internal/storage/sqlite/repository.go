@@ -103,6 +103,13 @@ func (r *Repository) CountThreads(ctx context.Context) (int, error) {
 	return r.client.Thread.Query().Count(ctx)
 }
 
+func (r *Repository) DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error {
+	_, err := r.client.Thread.Delete().
+		Where(thread.Provider(provider), thread.IDNotIn(ids...)).
+		Exec(ctx)
+	return err
+}
+
 func (r *Repository) SearchMessages(ctx context.Context, query string) ([]domain.Thread, error) {
 	entities, err := r.client.Thread.Query().
 		Where(thread.HasMessagesWith(message.ContentContains(query))).

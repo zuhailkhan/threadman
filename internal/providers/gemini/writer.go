@@ -2,9 +2,10 @@ package gemini
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,17 +30,22 @@ func (w *Writer) Name() string {
 	return "gemini"
 }
 
+func projectHash(workspacePath string) string {
+	h := sha256.Sum256([]byte(workspacePath))
+	return hex.EncodeToString(h[:])
+}
+
 func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string, error) {
 	sessionID := uuid.New().String()
-	now := time.Now()
+	now := time.Now().UTC()
 
-	encodedWS := url.PathEscape(thread.WorkspacePath)
-	dir := filepath.Join(w.baseDir, encodedWS, "chats")
+	dir := filepath.Join(w.baseDir, filepath.Base(thread.WorkspacePath), "chats")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("create chats dir: %w", err)
 	}
 
-	path := filepath.Join(dir, sessionID+".jsonl")
+	filename := fmt.Sprintf("session-%s-%s.jsonl", now.Format("2006-01-02T15-04"), sessionID[:8])
+	path := filepath.Join(dir, filename)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return "", fmt.Errorf("create session file: %w", err)
@@ -50,8 +56,11 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 
 	meta := sessionMetadata{
 		SessionID:   sessionID,
+		ProjectHash: projectHash(thread.WorkspacePath),
 		StartTime:   now,
 		LastUpdated: now,
+		Kind:        "main",
+		Title:       thread.Title,
 	}
 	if err := enc.Encode(meta); err != nil {
 		return "", fmt.Errorf("encode metadata: %w", err)
@@ -83,7 +92,7 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 }
 
 func (w *Writer) OpenCommand(sessionID string, workspacePath string) *exec.Cmd {
-	cmd := exec.Command("gemini")
+	cmd := exec.Command("gemini", "--resume", sessionID)
 	cmd.Dir = workspacePath
 	return cmd
 }

@@ -421,6 +421,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "esc":
 			m.state = stateList
+		case "r":
+			var w ports.ThreadWriter
+			for _, wr := range m.writers {
+				if wr.Name() == m.thread.Provider {
+					w = wr
+					break
+				}
+			}
+			if w == nil {
+				m.status = "no writer for provider: " + m.thread.Provider
+				return m, nil
+			}
+			cmd := w.OpenCommand(m.thread.OriginalID, m.thread.WorkspacePath)
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 		case "h":
 			if len(m.thread.Messages) == 0 {
 				m.status = "no messages to hand off"
@@ -710,7 +724,7 @@ func (m Model) viewThread() string {
 		title = "(untitled)"
 	}
 	tag := providerStyle(m.thread.Provider).Render("[" + m.thread.Provider + "]")
-	hint := styleHint.Render("[h] handoff  [q] back")
+	hint := styleHint.Render("[r] resume  [h] handoff  [q] back")
 	ws := styleHint.Render(m.thread.WorkspacePath)
 	left := tag + " " + styleTitle.Render(title) + "  " + ws
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(hint)

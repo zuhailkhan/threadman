@@ -23,6 +23,8 @@ type ThreadRepository interface {
 	SearchMessages(ctx context.Context, query string) ([]domain.Thread, error)
 
 	CountThreads(ctx context.Context) (int, error)
+
+	DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error
 }
 
 type ThreadInjector interface {
