@@ -2,6 +2,8 @@ package ports
 
 import (
 	"context"
+	"os/exec"
+
 	"github.com/zuhailkhan/threadman/internal/domain"
 )
 
@@ -37,3 +39,8 @@ type HookIngester interface {
 	IngestFromHook(ctx context.Context, payload HookPayload) (domain.Thread, error)
 }
 
+type ThreadWriter interface {
+	Name() string
+	WriteThread(ctx context.Context, thread domain.Thread) (string, error)
+	OpenCommand(sessionID string, workspacePath string) *exec.Cmd
+}

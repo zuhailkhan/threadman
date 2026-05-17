@@ -13,6 +13,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/hooks"
+	"github.com/zuhailkhan/threadman/internal/ports"
 	syncsvc "github.com/zuhailkhan/threadman/internal/sync"
 )
 
@@ -24,6 +25,8 @@ const (
 	stateList
 	stateThread
 	stateSearch
+	stateHandoffPicker
+	stateHandoffConfirm
 )
 
 type onboardingProvider struct {
@@ -40,6 +43,11 @@ type hookSetupDoneMsg struct{ errs []error }
 type dbChangedMsg struct{}
 type errMsg struct{ err error }
 type countMsg int
+type handoffWrittenMsg struct {
+	sessionID string
+	writer    ports.ThreadWriter
+}
+type handoffErrMsg struct{ err error }
 
 type Model struct {
 	svc                 *syncsvc.Service
@@ -56,6 +64,10 @@ type Model struct {
 	height              int
 	onboardingProviders []onboardingProvider
 	onboardingCursor    int
+	writers             []ports.ThreadWriter
+	handoffCursor       int
+	handoffTarget       ports.ThreadWriter
+	handoffSessionID    string
 }
 
 var providerLabels = map[string]string{
@@ -64,7 +76,7 @@ var providerLabels = map[string]string{
 	"opencode": "OpenCode",
 }
 
-func New(svc *syncsvc.Service, dbPath string) Model {
+func New(svc *syncsvc.Service, dbPath string, writers []ports.ThreadWriter) Model {
 	providers := make([]onboardingProvider, 0)
 	for _, name := range svc.ProviderNames() {
 		label := providerLabels[name]
@@ -75,7 +87,7 @@ func New(svc *syncsvc.Service, dbPath string) Model {
 	}
 	ch := make(chan struct{}, 1)
 	go watchDB(dbPath, ch)
-	return Model{svc: svc, dbChanges: ch, onboardingProviders: providers}
+	return Model{svc: svc, dbChanges: ch, onboardingProviders: providers, writers: writers}
 }
 
 func watchDB(path string, ch chan<- struct{}) {
@@ -179,6 +191,19 @@ func (m Model) openThread(t domain.Thread) tea.Cmd {
 	}
 }
 
+func (m Model) writeHandoff(w ports.ThreadWriter) tea.Cmd {
+	t := m.thread
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		id, err := w.WriteThread(ctx, t)
+		if err != nil {
+			return handoffErrMsg{err}
+		}
+		return handoffWrittenMsg{sessionID: id, writer: w}
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -256,6 +281,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case handoffWrittenMsg:
+		m.handoffTarget = msg.writer
+		m.handoffSessionID = msg.sessionID
+		m.status = ""
+		m.state = stateHandoffConfirm
+
+	case handoffErrMsg:
+		m.status = "handoff error: " + msg.err.Error()
+		m.state = stateThread
 
 	case errMsg:
 		m.status = "error: " + msg.err.Error()
@@ -386,10 +421,59 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "esc":
 			m.state = stateList
+		case "h":
+			if len(m.thread.Messages) == 0 {
+				m.status = "no messages to hand off"
+				return m, nil
+			}
+			m.handoffCursor = 0
+			m.state = stateHandoffPicker
 		default:
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
+		}
+
+	case stateHandoffPicker:
+		switch msg.String() {
+		case "esc", "q":
+			m.state = stateThread
+		case "up", "k":
+			if m.handoffCursor > 0 {
+				m.handoffCursor--
+			}
+		case "down", "j":
+			if m.handoffCursor < len(m.writers)-1 {
+				m.handoffCursor++
+			}
+		case "enter":
+			if len(m.writers) == 0 {
+				return m, nil
+			}
+			w := m.writers[m.handoffCursor]
+			m.handoffTarget = w
+			if w.Name() == m.thread.Provider {
+				m.handoffSessionID = m.thread.OriginalID
+				m.state = stateHandoffConfirm
+				return m, nil
+			}
+			m.status = "writing session..."
+			return m, m.writeHandoff(w)
+		}
+
+	case stateHandoffConfirm:
+		switch msg.String() {
+		case "y", "Y":
+			m.state = stateThread
+			m.status = ""
+			cmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.thread.WorkspacePath)
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+				return nil
+			})
+		case "n", "N", "esc":
+			openCmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.thread.WorkspacePath)
+			m.status = "run: " + strings.Join(openCmd.Args, " ")
+			m.state = stateThread
 		}
 	}
 
@@ -422,6 +506,10 @@ func (m Model) View() string {
 		return m.viewHookSetup()
 	case stateThread:
 		return m.viewThread()
+	case stateHandoffPicker:
+		return m.viewHandoffPicker()
+	case stateHandoffConfirm:
+		return m.viewHandoffConfirm()
 	default:
 		return m.viewList()
 	}
@@ -475,6 +563,68 @@ func (m Model) viewHookSetup() string {
 	inner.WriteString("\n")
 	inner.WriteString(styleHint.Render("  Enter / y  configure") + "\n")
 	inner.WriteString(styleHint.Render("  Esc / n    skip") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewHandoffPicker() string {
+	dialogWidth := 40
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString("  Hand off to:\n")
+	inner.WriteString("\n")
+	for i, w := range m.writers {
+		label := providerLabels[w.Name()]
+		if label == "" {
+			label = w.Name()
+		}
+		line := fmt.Sprintf("  %s", label)
+		if i == m.handoffCursor {
+			line = styleCursor.Render("▶") + fmt.Sprintf(" %s", label)
+		}
+		inner.WriteString(line + "\n")
+	}
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  ↑↓ navigate  Enter select  Esc back") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewHandoffConfirm() string {
+	dialogWidth := 50
+
+	label := providerLabels[m.handoffTarget.Name()]
+	if label == "" {
+		label = m.handoffTarget.Name()
+	}
+
+	var prompt string
+	if m.handoffTarget.Name() == m.thread.Provider {
+		prompt = fmt.Sprintf("  Resume existing session in %s?", label)
+	} else {
+		prompt = fmt.Sprintf("  Open in %s?", label)
+	}
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString(prompt + "\n")
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  y  open    n / Esc  cancel") + "\n")
 	inner.WriteString("\n")
 
 	dialog := lipgloss.NewStyle().
@@ -560,7 +710,7 @@ func (m Model) viewThread() string {
 		title = "(untitled)"
 	}
 	tag := providerStyle(m.thread.Provider).Render("[" + m.thread.Provider + "]")
-	hint := styleHint.Render("[q] back")
+	hint := styleHint.Render("[h] handoff  [q] back")
 	ws := styleHint.Render(m.thread.WorkspacePath)
 	left := tag + " " + styleTitle.Render(title) + "  " + ws
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(hint)
