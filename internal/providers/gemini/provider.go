@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,11 +96,16 @@ func (p *Provider) parseMetadata(path string, projectName string) (domain.Thread
 		return domain.Thread{}, err
 	}
 
+	workspacePath, err := url.PathUnescape(projectName)
+	if err != nil {
+		workspacePath = projectName
+	}
+
 	return domain.Thread{
 		ID:             fmt.Sprintf("gemini-%s", meta.SessionID),
 		Provider:       "gemini",
 		OriginalID:     meta.SessionID,
-		WorkspacePath:  projectName,
+		WorkspacePath:  workspacePath,
 		SourceFilePath: path,
 		CreatedAt:      meta.StartTime,
 		LastSyncedAt:   meta.LastUpdated,
