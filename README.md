@@ -1,6 +1,6 @@
 # threadman
 
-`threadman` aggregates AI conversation threads from Claude, Gemini, and OpenCode into a single interactive terminal UI.
+`threadman` is a terminal interface for managing AI conversation threads across Claude, Gemini, and OpenCode — browse, search, hand off between providers, and sync across devices.
 
 ## Features
 
