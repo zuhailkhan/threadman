@@ -7,6 +7,8 @@
 - **Interactive TUI** — full-screen thread browser with colors, navigation, and inline search
 - **Multi-provider sync** — reads local session files from Claude Code, Gemini CLI, and OpenCode
 - **Thread reader** — scrollable message view with You/Assistant labels
+- **Handoff** — transfer any conversation to a different provider's native session format and open it immediately
+- **Thread grouping** — threads handed off across providers are grouped into a single row with provider icon clusters `[C G O]`
 - **CLI subcommands** — `sync`, `list`, `search` for scripting
 
 
@@ -48,6 +50,8 @@ threadman search <query>
 | s | Sync all providers |
 | / | Inline search |
 | PgUp / PgDn | Scroll thread |
+| h | Handoff current thread to another provider |
+| r | Resume current thread in its native provider CLI |
 
 ## Installation
 
