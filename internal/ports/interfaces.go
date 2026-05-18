@@ -2,6 +2,8 @@ package ports
 
 import (
 	"context"
+	"os/exec"
+
 	"github.com/zuhailkhan/threadman/internal/domain"
 )
 
@@ -21,6 +23,10 @@ type ThreadRepository interface {
 	SearchMessages(ctx context.Context, query string) ([]domain.Thread, error)
 
 	CountThreads(ctx context.Context) (int, error)
+
+	DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error
+
+	RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error
 }
 
 type ThreadInjector interface {
@@ -37,3 +43,8 @@ type HookIngester interface {
 	IngestFromHook(ctx context.Context, payload HookPayload) (domain.Thread, error)
 }
 
+type ThreadWriter interface {
+	Name() string
+	WriteThread(ctx context.Context, thread domain.Thread) (string, error)
+	OpenCommand(sessionID string, workspacePath string) *exec.Cmd
+}

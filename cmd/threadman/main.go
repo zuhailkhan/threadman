@@ -41,8 +41,14 @@ func main() {
 		opencode.NewProvider(),
 	}, repo)
 
+	writers := []ports.ThreadWriter{
+		claude.NewWriter(),
+		gemini.NewWriter(),
+		opencode.NewWriter(),
+	}
+
 	if err := cli.Execute(svc, func() {
-		m := tui.New(svc, filepath.Join(dbDir, "threads.db"))
+		m := tui.New(svc, filepath.Join(dbDir, "threads.db"), writers)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)

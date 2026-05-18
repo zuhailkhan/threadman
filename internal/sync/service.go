@@ -42,7 +42,9 @@ func (s *Service) SyncAll(ctx context.Context) []SyncResult {
 		}
 		result.ThreadsFound = len(threads)
 
+		discoveredIDs := make([]string, 0, len(threads))
 		for _, t := range threads {
+			discoveredIDs = append(discoveredIDs, t.ID)
 			full, err := p.GetThreadDetails(ctx, t)
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", t.OriginalID, err))
@@ -58,6 +60,10 @@ func (s *Service) SyncAll(ctx context.Context) []SyncResult {
 				continue
 			}
 			result.ThreadsSaved++
+		}
+
+		if err := s.repo.DeleteThreadsNotIn(ctx, p.Name(), discoveredIDs); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("prune stale threads: %v", err))
 		}
 
 		results = append(results, result)
@@ -121,6 +127,10 @@ func (s *Service) ProviderNames() []string {
 		names[i] = p.Name()
 	}
 	return names
+}
+
+func (s *Service) RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error {
+	return s.repo.RecordHandoff(ctx, source, targetProvider, targetOriginalID)
 }
 
 func (s *Service) CountThreads(ctx context.Context) (int, error) {

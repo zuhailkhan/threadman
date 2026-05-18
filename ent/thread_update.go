@@ -99,6 +99,20 @@ func (_u *ThreadUpdate) SetNillableSourceFilePath(v *string) *ThreadUpdate {
 	return _u
 }
 
+// SetCanonicalID sets the "canonical_id" field.
+func (_u *ThreadUpdate) SetCanonicalID(v string) *ThreadUpdate {
+	_u.mutation.SetCanonicalID(v)
+	return _u
+}
+
+// SetNillableCanonicalID sets the "canonical_id" field if the given value is not nil.
+func (_u *ThreadUpdate) SetNillableCanonicalID(v *string) *ThreadUpdate {
+	if v != nil {
+		_u.SetCanonicalID(*v)
+	}
+	return _u
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (_u *ThreadUpdate) SetCreatedAt(v time.Time) *ThreadUpdate {
 	_u.mutation.SetCreatedAt(v)
@@ -218,6 +232,9 @@ func (_u *ThreadUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.SourceFilePath(); ok {
 		_spec.SetField(thread.FieldSourceFilePath, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CanonicalID(); ok {
+		_spec.SetField(thread.FieldCanonicalID, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.CreatedAt(); ok {
 		_spec.SetField(thread.FieldCreatedAt, field.TypeTime, value)
@@ -356,6 +373,20 @@ func (_u *ThreadUpdateOne) SetSourceFilePath(v string) *ThreadUpdateOne {
 func (_u *ThreadUpdateOne) SetNillableSourceFilePath(v *string) *ThreadUpdateOne {
 	if v != nil {
 		_u.SetSourceFilePath(*v)
+	}
+	return _u
+}
+
+// SetCanonicalID sets the "canonical_id" field.
+func (_u *ThreadUpdateOne) SetCanonicalID(v string) *ThreadUpdateOne {
+	_u.mutation.SetCanonicalID(v)
+	return _u
+}
+
+// SetNillableCanonicalID sets the "canonical_id" field if the given value is not nil.
+func (_u *ThreadUpdateOne) SetNillableCanonicalID(v *string) *ThreadUpdateOne {
+	if v != nil {
+		_u.SetCanonicalID(*v)
 	}
 	return _u
 }
@@ -509,6 +540,9 @@ func (_u *ThreadUpdateOne) sqlSave(ctx context.Context) (_node *Thread, err erro
 	}
 	if value, ok := _u.mutation.SourceFilePath(); ok {
 		_spec.SetField(thread.FieldSourceFilePath, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CanonicalID(); ok {
+		_spec.SetField(thread.FieldCanonicalID, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.CreatedAt(); ok {
 		_spec.SetField(thread.FieldCreatedAt, field.TypeTime, value)

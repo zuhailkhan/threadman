@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -192,6 +193,15 @@ func (p *Provider) parseMetadata(path string) (domain.Thread, error) {
 		title = truncate(firstMsg, 50)
 	}
 
+	if workspacePath == "" {
+		projectDir := filepath.Base(filepath.Dir(path))
+		if decoded, err := url.PathUnescape(projectDir); err == nil {
+			workspacePath = decoded
+		} else {
+			workspacePath = projectDir
+		}
+	}
+
 	return domain.Thread{
 		ID:             fmt.Sprintf("claude-%s", sessionID),
 		Provider:       "claude",
@@ -231,15 +241,21 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 		switch base.Type {
 		case "user":
 			var e userEntry
-			if err := json.Unmarshal(line, &e); err != nil || e.IsMeta {
+			if err := json.Unmarshal(line, &e); err != nil {
 				continue
 			}
 			content := extractUserContent(e.Message.Content)
-			if content == "" || strings.HasPrefix(content, "<") {
+			if content == "" {
+				continue
+			}
+			role := domain.RoleUser
+			if e.IsMeta {
+				role = domain.RoleSystem
+			} else if strings.HasPrefix(content, "<") {
 				continue
 			}
 			ts, _ := time.Parse(time.RFC3339, e.Timestamp)
-			msg = domain.Message{ID: e.UUID, Role: domain.RoleUser, Content: content, Timestamp: ts}
+			msg = domain.Message{ID: e.UUID, Role: role, Content: content, Timestamp: ts}
 
 		case "assistant":
 			var e assistantEntry

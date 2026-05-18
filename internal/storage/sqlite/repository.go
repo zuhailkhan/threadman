@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/zuhailkhan/threadman/ent"
 	"github.com/zuhailkhan/threadman/ent/message"
@@ -42,10 +44,22 @@ func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
 		SetTitle(t.Title).
 		SetWorkspacePath(t.WorkspacePath).
 		SetSourceFilePath(t.SourceFilePath).
+		SetCanonicalID(t.CanonicalID).
 		SetCreatedAt(t.CreatedAt).
 		SetLastSyncedAt(t.LastSyncedAt).
 		OnConflict().
-		UpdateNewValues().
+		Update(func(u *ent.ThreadUpsert) {
+			u.SetProvider(t.Provider)
+			u.SetOriginalID(t.OriginalID)
+			u.SetTitle(t.Title)
+			u.SetWorkspacePath(t.WorkspacePath)
+			u.SetSourceFilePath(t.SourceFilePath)
+			u.SetCreatedAt(t.CreatedAt)
+			u.SetLastSyncedAt(t.LastSyncedAt)
+			if t.CanonicalID != "" {
+				u.SetCanonicalID(t.CanonicalID)
+			}
+		}).
 		Exec(ctx)
 	if err != nil {
 		tx.Rollback()
@@ -103,6 +117,13 @@ func (r *Repository) CountThreads(ctx context.Context) (int, error) {
 	return r.client.Thread.Query().Count(ctx)
 }
 
+func (r *Repository) DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error {
+	_, err := r.client.Thread.Delete().
+		Where(thread.Provider(provider), thread.IDNotIn(ids...)).
+		Exec(ctx)
+	return err
+}
+
 func (r *Repository) SearchMessages(ctx context.Context, query string) ([]domain.Thread, error) {
 	entities, err := r.client.Thread.Query().
 		Where(thread.HasMessagesWith(message.ContentContains(query))).
@@ -118,6 +139,31 @@ func (r *Repository) SearchMessages(ctx context.Context, query string) ([]domain
 	}
 
 	return threads, nil
+}
+
+func (r *Repository) RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error {
+	rootID := source.CanonicalID
+	if rootID == "" {
+		rootID = source.ID
+	}
+
+	if err := r.client.Thread.UpdateOneID(source.ID).
+		SetCanonicalID(rootID).
+		Exec(ctx); err != nil {
+		return fmt.Errorf("set source canonical_id: %w", err)
+	}
+
+	stub := domain.Thread{
+		ID:            targetProvider + "-" + targetOriginalID,
+		Provider:      targetProvider,
+		OriginalID:    targetOriginalID,
+		CanonicalID:   rootID,
+		Title:         source.Title,
+		WorkspacePath: source.WorkspacePath,
+		CreatedAt:     time.Now(),
+		LastSyncedAt:  time.Now(),
+	}
+	return r.UpsertThread(ctx, stub)
 }
 
 func mapEntThreadToDomain(e *ent.Thread) domain.Thread {
@@ -138,6 +184,7 @@ func mapEntThreadToDomain(e *ent.Thread) domain.Thread {
 		Title:          e.Title,
 		WorkspacePath:  e.WorkspacePath,
 		SourceFilePath: e.SourceFilePath,
+		CanonicalID:    e.CanonicalID,
 		Messages:       messages,
 		CreatedAt:      e.CreatedAt,
 		LastSyncedAt:   e.LastSyncedAt,

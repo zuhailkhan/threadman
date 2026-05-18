@@ -3,6 +3,8 @@ package gemini
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,8 +22,11 @@ type Provider struct {
 
 type sessionMetadata struct {
 	SessionID   string    `json:"sessionId"`
+	ProjectHash string    `json:"projectHash"`
 	StartTime   time.Time `json:"startTime"`
 	LastUpdated time.Time `json:"lastUpdated"`
+	Kind        string    `json:"kind"`
+	Title       string    `json:"title,omitempty"`
 }
 
 type logEntry struct {
@@ -77,6 +82,53 @@ func (p *Provider) DiscoverThreads(ctx context.Context) ([]domain.Thread, error)
 	return threads, nil
 }
 
+func hashMatches(path, expected string) bool {
+	h := sha256.Sum256([]byte(path))
+	return hex.EncodeToString(h[:]) == expected
+}
+
+func resolveWorkspacePath(basename, projectHash string) string {
+	home, _ := os.UserHomeDir()
+
+	// Check common parent directories first.
+	common := []string{"workspace", "projects", "code", "dev", "src", "repos"}
+	for _, parent := range common {
+		c := filepath.Join(home, parent, basename)
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			if projectHash == "" || hashMatches(c, projectHash) {
+				return c
+			}
+		}
+	}
+
+	// Also check directly under home.
+	if c := filepath.Join(home, basename); func() bool {
+		info, err := os.Stat(c)
+		return err == nil && info.IsDir()
+	}() {
+		if projectHash == "" || hashMatches(c, projectHash) {
+			return c
+		}
+	}
+
+	// Broader search: one level of subdirectories under home.
+	if projectHash != "" {
+		if entries, err := os.ReadDir(home); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				c := filepath.Join(home, e.Name(), basename)
+				if info, err := os.Stat(c); err == nil && info.IsDir() && hashMatches(c, projectHash) {
+					return c
+				}
+			}
+		}
+	}
+
+	return basename
+}
+
 func (p *Provider) parseMetadata(path string, projectName string) (domain.Thread, error) {
 	file, fileOpenError := os.Open(path)
 	if fileOpenError != nil {
@@ -95,11 +147,14 @@ func (p *Provider) parseMetadata(path string, projectName string) (domain.Thread
 		return domain.Thread{}, err
 	}
 
+	workspacePath := resolveWorkspacePath(projectName, meta.ProjectHash)
+
 	return domain.Thread{
 		ID:             fmt.Sprintf("gemini-%s", meta.SessionID),
 		Provider:       "gemini",
 		OriginalID:     meta.SessionID,
-		WorkspacePath:  projectName,
+		Title:          meta.Title,
+		WorkspacePath:  workspacePath,
 		SourceFilePath: path,
 		CreatedAt:      meta.StartTime,
 		LastSyncedAt:   meta.LastUpdated,
@@ -114,6 +169,9 @@ func (p *Provider) IngestFromHook(ctx context.Context, payload ports.HookPayload
 	t, err := p.parseMetadata(payload.TranscriptPath, projectName)
 	if err != nil {
 		return domain.Thread{}, err
+	}
+	if payload.CWD != "" {
+		t.WorkspacePath = payload.CWD
 	}
 	return p.GetThreadDetails(ctx, t)
 }
@@ -193,7 +251,7 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 	}
 
 	t.Messages = messages
-	if len(messages) > 0 {
+	if t.Title == "" && len(messages) > 0 {
 		t.Title = messages[0].Content
 		if len(t.Title) > 50 {
 			t.Title = strings.ReplaceAll(t.Title, "\n", " ")

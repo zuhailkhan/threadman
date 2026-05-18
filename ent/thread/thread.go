@@ -22,6 +22,8 @@ const (
 	FieldWorkspacePath = "workspace_path"
 	// FieldSourceFilePath holds the string denoting the source_file_path field in the database.
 	FieldSourceFilePath = "source_file_path"
+	// FieldCanonicalID holds the string denoting the canonical_id field in the database.
+	FieldCanonicalID = "canonical_id"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// FieldLastSyncedAt holds the string denoting the last_synced_at field in the database.
@@ -47,6 +49,7 @@ var Columns = []string{
 	FieldTitle,
 	FieldWorkspacePath,
 	FieldSourceFilePath,
+	FieldCanonicalID,
 	FieldCreatedAt,
 	FieldLastSyncedAt,
 }
@@ -60,6 +63,11 @@ func ValidColumn(column string) bool {
 	}
 	return false
 }
+
+var (
+	// DefaultCanonicalID holds the default value on creation for the "canonical_id" field.
+	DefaultCanonicalID string
+)
 
 // OrderOption defines the ordering options for the Thread queries.
 type OrderOption func(*sql.Selector)
@@ -92,6 +100,11 @@ func ByWorkspacePath(opts ...sql.OrderTermOption) OrderOption {
 // BySourceFilePath orders the results by the source_file_path field.
 func BySourceFilePath(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldSourceFilePath, opts...).ToFunc()
+}
+
+// ByCanonicalID orders the results by the canonical_id field.
+func ByCanonicalID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCanonicalID, opts...).ToFunc()
 }
 
 // ByCreatedAt orders the results by the created_at field.

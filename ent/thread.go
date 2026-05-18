@@ -27,6 +27,8 @@ type Thread struct {
 	WorkspacePath string `json:"workspace_path,omitempty"`
 	// SourceFilePath holds the value of the "source_file_path" field.
 	SourceFilePath string `json:"source_file_path,omitempty"`
+	// CanonicalID holds the value of the "canonical_id" field.
+	CanonicalID string `json:"canonical_id,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt time.Time `json:"created_at,omitempty"`
 	// LastSyncedAt holds the value of the "last_synced_at" field.
@@ -60,7 +62,7 @@ func (*Thread) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case thread.FieldID, thread.FieldProvider, thread.FieldOriginalID, thread.FieldTitle, thread.FieldWorkspacePath, thread.FieldSourceFilePath:
+		case thread.FieldID, thread.FieldProvider, thread.FieldOriginalID, thread.FieldTitle, thread.FieldWorkspacePath, thread.FieldSourceFilePath, thread.FieldCanonicalID:
 			values[i] = new(sql.NullString)
 		case thread.FieldCreatedAt, thread.FieldLastSyncedAt:
 			values[i] = new(sql.NullTime)
@@ -114,6 +116,12 @@ func (_m *Thread) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field source_file_path", values[i])
 			} else if value.Valid {
 				_m.SourceFilePath = value.String
+			}
+		case thread.FieldCanonicalID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field canonical_id", values[i])
+			} else if value.Valid {
+				_m.CanonicalID = value.String
 			}
 		case thread.FieldCreatedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -182,6 +190,9 @@ func (_m *Thread) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("source_file_path=")
 	builder.WriteString(_m.SourceFilePath)
+	builder.WriteString(", ")
+	builder.WriteString("canonical_id=")
+	builder.WriteString(_m.CanonicalID)
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))

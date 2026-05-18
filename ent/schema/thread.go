@@ -18,6 +18,7 @@ func (Thread) Fields() []ent.Field {
 		field.String("title"),
 		field.String("workspace_path"),
 		field.String("source_file_path"),
+		field.String("canonical_id").Default(""),
 		field.Time("created_at"),
 		field.Time("last_synced_at"),
 	}

@@ -30,6 +30,8 @@ type Thread struct {
 
 	SourceFilePath string `json:"source_file_path"`
 
+	CanonicalID string `json:"canonical_id"`
+
 	Messages []Message `json:"messages"`
 
 	CreatedAt time.Time `json:"created_at"`
