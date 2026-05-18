@@ -27,6 +27,7 @@ const (
 	stateSearch
 	stateHandoffPicker
 	stateHandoffConfirm
+	stateResumePicker
 )
 
 type onboardingProvider struct {
@@ -48,17 +49,20 @@ type handoffWrittenMsg struct {
 	writer    ports.ThreadWriter
 }
 type handoffErrMsg struct{ err error }
+type handoffLinkErrMsg struct{ err error }
 
 type Model struct {
 	svc                 *syncsvc.Service
 	dbChanges           <-chan struct{}
 	threads             []domain.Thread
-	filtered            []domain.Thread
+	groups              []ThreadGroup
+	filteredGroups      []ThreadGroup
 	cursor              int
 	state               appState
 	query               string
 	viewport            viewport.Model
 	thread              domain.Thread
+	groupThreads        []domain.Thread
 	status              string
 	width               int
 	height              int
@@ -66,8 +70,68 @@ type Model struct {
 	onboardingCursor    int
 	writers             []ports.ThreadWriter
 	handoffCursor       int
+	handoffTargets      []ports.ThreadWriter
 	handoffTarget       ports.ThreadWriter
 	handoffSessionID    string
+	resumeCursor        int
+}
+
+type ThreadGroup struct {
+	Primary domain.Thread
+	Members []domain.Thread
+}
+
+func buildGroups(threads []domain.Thread) []ThreadGroup {
+	type entry struct {
+		primary domain.Thread
+		members []domain.Thread
+		hasPrim bool
+	}
+	byKey := map[string]*entry{}
+	order := []string{}
+
+	for _, t := range threads {
+		key := t.CanonicalID
+		if key == "" {
+			key = t.ID
+		}
+		if _, ok := byKey[key]; !ok {
+			byKey[key] = &entry{}
+			order = append(order, key)
+		}
+		e := byKey[key]
+		e.members = append(e.members, t)
+		if t.ID == t.CanonicalID && !e.hasPrim {
+			e.primary = t
+			e.hasPrim = true
+		}
+	}
+
+	groups := make([]ThreadGroup, 0, len(order))
+	for _, key := range order {
+		e := byKey[key]
+		if !e.hasPrim && len(e.members) > 0 {
+			e.primary = e.members[0]
+		}
+		groups = append(groups, ThreadGroup{Primary: e.primary, Members: e.members})
+	}
+	return groups
+}
+
+func providerIcons(g ThreadGroup) string {
+	seen := map[string]bool{g.Primary.Provider: true}
+	providers := []string{g.Primary.Provider}
+	for _, m := range g.Members {
+		if !seen[m.Provider] {
+			seen[m.Provider] = true
+			providers = append(providers, m.Provider)
+		}
+	}
+	parts := make([]string, len(providers))
+	for i, p := range providers {
+		parts[i] = providerStyle(p).Render(providerIcon(p))
+	}
+	return "[" + strings.Join(parts, " ") + "]"
 }
 
 var providerLabels = map[string]string{
@@ -204,6 +268,32 @@ func (m Model) writeHandoff(w ports.ThreadWriter) tea.Cmd {
 	}
 }
 
+func (m Model) recordHandoffLink(targetProvider, targetOriginalID string) tea.Cmd {
+	source := m.thread
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := m.svc.RecordHandoff(ctx, source, targetProvider, targetOriginalID); err != nil {
+			return handoffLinkErrMsg{err}
+		}
+		return nil
+	}
+}
+
+func (m Model) availableHandoffTargets() []ports.ThreadWriter {
+	inGroup := map[string]bool{}
+	for _, t := range m.groupThreads {
+		inGroup[t.Provider] = true
+	}
+	available := make([]ports.ThreadWriter, 0, len(m.writers))
+	for _, w := range m.writers {
+		if !inGroup[w.Name()] {
+			available = append(available, w)
+		}
+	}
+	return available
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -222,6 +312,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case []domain.Thread:
 		m.threads = msg
+		m.groups = buildGroups(m.threads)
 		m.applyFilter()
 		m.status = ""
 
@@ -263,7 +354,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case backgroundThreadsMsg:
 		m.threads = []domain.Thread(msg)
+		m.groups = buildGroups(m.threads)
 		m.applyFilter()
+		if m.state == stateThread {
+			for _, g := range m.groups {
+				if g.Primary.ID == m.thread.ID {
+					m.groupThreads = g.Members
+					break
+				}
+			}
+		}
 
 	case threadLoadedMsg:
 		m.thread = msg.thread
@@ -287,10 +387,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handoffSessionID = msg.sessionID
 		m.status = ""
 		m.state = stateHandoffConfirm
+		return m, m.recordHandoffLink(msg.writer.Name(), msg.sessionID)
 
 	case handoffErrMsg:
 		m.status = "handoff error: " + msg.err.Error()
 		m.state = stateThread
+
+	case handoffLinkErrMsg:
+		m.status = "warning: handoff link: " + msg.err.Error()
 
 	case errMsg:
 		m.status = "error: " + msg.err.Error()
@@ -376,12 +480,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.cursor--
 			}
 		case "down", "j":
-			if m.cursor < len(m.filtered)-1 {
+			if m.cursor < len(m.filteredGroups)-1 {
 				m.cursor++
 			}
 		case "enter":
-			if len(m.filtered) > 0 {
-				return m, m.openThread(m.filtered[m.cursor])
+			if len(m.filteredGroups) > 0 {
+				g := m.filteredGroups[m.cursor]
+				m.groupThreads = g.Members
+				return m, m.openThread(g.Primary)
 			}
 		case "s":
 			m.status = "syncing..."
@@ -422,22 +528,31 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "q", "esc":
 			m.state = stateList
 		case "r":
-			var w ports.ThreadWriter
-			for _, wr := range m.writers {
-				if wr.Name() == m.thread.Provider {
-					w = wr
-					break
+			if len(m.groupThreads) <= 1 {
+				var w ports.ThreadWriter
+				for _, wr := range m.writers {
+					if wr.Name() == m.thread.Provider {
+						w = wr
+						break
+					}
 				}
+				if w == nil {
+					m.status = "no writer for provider: " + m.thread.Provider
+					return m, nil
+				}
+				cmd := w.OpenCommand(m.thread.OriginalID, m.thread.WorkspacePath)
+				return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 			}
-			if w == nil {
-				m.status = "no writer for provider: " + m.thread.Provider
-				return m, nil
-			}
-			cmd := w.OpenCommand(m.thread.OriginalID, m.thread.WorkspacePath)
-			return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+			m.resumeCursor = 0
+			m.state = stateResumePicker
 		case "h":
 			if len(m.thread.Messages) == 0 {
 				m.status = "no messages to hand off"
+				return m, nil
+			}
+			m.handoffTargets = m.availableHandoffTargets()
+			if len(m.handoffTargets) == 0 {
+				m.status = "thread already exists in all providers"
 				return m, nil
 			}
 			m.handoffCursor = 0
@@ -457,20 +572,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.handoffCursor--
 			}
 		case "down", "j":
-			if m.handoffCursor < len(m.writers)-1 {
+			if m.handoffCursor < len(m.handoffTargets)-1 {
 				m.handoffCursor++
 			}
 		case "enter":
-			if len(m.writers) == 0 {
+			if len(m.handoffTargets) == 0 {
 				return m, nil
 			}
-			w := m.writers[m.handoffCursor]
+			w := m.handoffTargets[m.handoffCursor]
 			m.handoffTarget = w
-			if w.Name() == m.thread.Provider {
-				m.handoffSessionID = m.thread.OriginalID
-				m.state = stateHandoffConfirm
-				return m, nil
-			}
 			m.status = "writing session..."
 			return m, m.writeHandoff(w)
 		}
@@ -489,6 +599,40 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "run: " + strings.Join(openCmd.Args, " ")
 			m.state = stateThread
 		}
+
+	case stateResumePicker:
+		switch msg.String() {
+		case "esc", "q":
+			m.state = stateThread
+		case "up", "k":
+			if m.resumeCursor > 0 {
+				m.resumeCursor--
+			}
+		case "down", "j":
+			if m.resumeCursor < len(m.groupThreads)-1 {
+				m.resumeCursor++
+			}
+		case "enter":
+			if len(m.groupThreads) == 0 {
+				return m, nil
+			}
+			t := m.groupThreads[m.resumeCursor]
+			var w ports.ThreadWriter
+			for _, wr := range m.writers {
+				if wr.Name() == t.Provider {
+					w = wr
+					break
+				}
+			}
+			if w == nil {
+				m.status = "no writer for provider: " + t.Provider
+				m.state = stateThread
+				return m, nil
+			}
+			m.state = stateThread
+			cmd := w.OpenCommand(t.OriginalID, t.WorkspacePath)
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+		}
 	}
 
 	return m, nil
@@ -496,15 +640,21 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) applyFilter() {
 	if m.query == "" {
-		m.filtered = m.threads
+		m.filteredGroups = m.groups
 		return
 	}
 	q := strings.ToLower(m.query)
-	m.filtered = make([]domain.Thread, 0, len(m.threads))
-	for _, t := range m.threads {
-		if strings.Contains(strings.ToLower(t.Title), q) ||
-			strings.Contains(strings.ToLower(t.Provider), q) {
-			m.filtered = append(m.filtered, t)
+	m.filteredGroups = make([]ThreadGroup, 0)
+	for _, g := range m.groups {
+		if strings.Contains(strings.ToLower(g.Primary.Title), q) {
+			m.filteredGroups = append(m.filteredGroups, g)
+			continue
+		}
+		for _, mem := range g.Members {
+			if strings.Contains(strings.ToLower(mem.Provider), q) {
+				m.filteredGroups = append(m.filteredGroups, g)
+				break
+			}
 		}
 	}
 }
@@ -524,6 +674,8 @@ func (m Model) View() string {
 		return m.viewHandoffPicker()
 	case stateHandoffConfirm:
 		return m.viewHandoffConfirm()
+	case stateResumePicker:
+		return m.viewResumePicker()
 	default:
 		return m.viewList()
 	}
@@ -595,13 +747,44 @@ func (m Model) viewHandoffPicker() string {
 	inner.WriteString("\n")
 	inner.WriteString("  Hand off to:\n")
 	inner.WriteString("\n")
-	for i, w := range m.writers {
+	for i, w := range m.handoffTargets {
 		label := providerLabels[w.Name()]
 		if label == "" {
 			label = w.Name()
 		}
 		line := fmt.Sprintf("  %s", label)
 		if i == m.handoffCursor {
+			line = styleCursor.Render("▶") + fmt.Sprintf(" %s", label)
+		}
+		inner.WriteString(line + "\n")
+	}
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  ↑↓ navigate  Enter select  Esc back") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewResumePicker() string {
+	dialogWidth := 40
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString("  Resume in:\n")
+	inner.WriteString("\n")
+	for i, t := range m.groupThreads {
+		label := providerLabels[t.Provider]
+		if label == "" {
+			label = t.Provider
+		}
+		line := fmt.Sprintf("  %s", label)
+		if i == m.resumeCursor {
 			line = styleCursor.Render("▶") + fmt.Sprintf(" %s", label)
 		}
 		inner.WriteString(line + "\n")
@@ -667,11 +850,11 @@ func (m Model) viewList() string {
 	if m.state == stateSearch {
 		b.WriteString(styleHeader.Render(fmt.Sprintf("  search: %s_", m.query)) + "\n")
 	} else {
-		titleWidth := m.width - 50
+		titleWidth := m.width - 47
 		if titleWidth < 10 {
 			titleWidth = 10
 		}
-		b.WriteString(styleHeader.Render(fmt.Sprintf("  %-3s  %-10s  %-*s  %-18s  %s", "#", "PROVIDER", titleWidth, "TITLE", "WORKSPACE", "DATE")) + "\n")
+		b.WriteString(styleHeader.Render(fmt.Sprintf("  %-3s  %-7s  %-*s  %-18s  %s", "#", "PROV", titleWidth, "TITLE", "WORKSPACE", "DATE")) + "\n")
 	}
 	b.WriteString(styleSep.Render(strings.Repeat("─", m.width)) + "\n")
 
@@ -681,10 +864,10 @@ func (m Model) viewList() string {
 	if m.cursor >= listHeight {
 		start = m.cursor - listHeight + 1
 	}
-	for i := start; i < len(m.filtered) && i < start+listHeight; i++ {
-		t := m.filtered[i]
+	for i := start; i < len(m.filteredGroups) && i < start+listHeight; i++ {
+		g := m.filteredGroups[i]
 		cursor := "  "
-		row := renderListRow(i+1, t, m.width)
+		row := renderListRow(i+1, g, m.width)
 		if i == m.cursor {
 			cursor = styleCursor.Render("▶ ")
 			row = styleSelected.Width(m.width - 2).Render(row)
@@ -693,7 +876,7 @@ func (m Model) viewList() string {
 	}
 
 	// fill remaining space
-	rendered := start + min(listHeight, len(m.filtered)-start)
+	rendered := start + min(listHeight, len(m.filteredGroups)-start)
 	for i := rendered; i < listHeight; i++ {
 		b.WriteString("\n")
 	}
@@ -703,7 +886,7 @@ func (m Model) viewList() string {
 	if m.status != "" {
 		statusLine = m.status
 	} else {
-		count := fmt.Sprintf("%d threads", len(m.filtered))
+		count := fmt.Sprintf("%d threads", len(m.filteredGroups))
 		nav := "↑↓ navigate  Enter open"
 		statusGap := m.width - len(count) - len(nav) - 2
 		if statusGap < 1 {
@@ -723,7 +906,12 @@ func (m Model) viewThread() string {
 	if title == "" {
 		title = "(untitled)"
 	}
-	tag := providerStyle(m.thread.Provider).Render("[" + m.thread.Provider + "]")
+	var tag string
+	if len(m.groupThreads) > 1 {
+		tag = providerIcons(ThreadGroup{Primary: m.thread, Members: m.groupThreads})
+	} else {
+		tag = providerStyle(m.thread.Provider).Render("[" + m.thread.Provider + "]")
+	}
 	hint := styleHint.Render("[r] resume  [h] handoff  [q] back")
 	ws := styleHint.Render(m.thread.WorkspacePath)
 	left := tag + " " + styleTitle.Render(title) + "  " + ws
@@ -742,27 +930,32 @@ func (m Model) viewThread() string {
 	return b.String()
 }
 
-func renderListRow(n int, t domain.Thread, width int) string {
-	// fixed columns: num(3) + gap(2) + provider(10) + gap(2) + gap(2) + ws(18) + gap(2) + date(9) + cursor(2) = 50
-	titleWidth := width - 50
+func renderListRow(n int, g ThreadGroup, width int) string {
+	// fixed: cursor(2) + num(3) + gap(2) + icons(7) + gap(2) + gap(2) + ws(18) + gap(2) + date(9) = 47
+	titleWidth := width - 47
 	if titleWidth < 10 {
 		titleWidth = 10
 	}
 
-	tag := providerStyle(t.Provider).Render(fmt.Sprintf("%-10s", "["+t.Provider+"]"))
-	title := t.Title
+	icons := providerIcons(g)
+	iconsVisual := lipgloss.Width(icons)
+	if iconsVisual < 7 {
+		icons += strings.Repeat(" ", 7-iconsVisual)
+	}
+
+	title := g.Primary.Title
 	if title == "" {
 		title = "(untitled)"
 	}
 	if len(title) > titleWidth {
 		title = title[:titleWidth-3] + "..."
 	}
-	ws := filepath.Base(t.WorkspacePath)
+	ws := filepath.Base(g.Primary.WorkspacePath)
 	if len(ws) > 18 {
 		ws = ws[:15] + "..."
 	}
-	date := lastMessageDate(t)
-	return fmt.Sprintf("%-3d  %s  %-*s  %-18s  %s", n, tag, titleWidth, title, ws, date)
+	date := lastMessageDate(g.Primary)
+	return fmt.Sprintf("%-3d  %s  %-*s  %-18s  %s", n, icons, titleWidth, title, ws, date)
 }
 
 func renderThread(t domain.Thread) string {

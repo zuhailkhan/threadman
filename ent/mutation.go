@@ -547,6 +547,7 @@ type ThreadMutation struct {
 	title            *string
 	workspace_path   *string
 	source_file_path *string
+	canonical_id     *string
 	created_at       *time.Time
 	last_synced_at   *time.Time
 	clearedFields    map[string]struct{}
@@ -842,6 +843,42 @@ func (m *ThreadMutation) ResetSourceFilePath() {
 	m.source_file_path = nil
 }
 
+// SetCanonicalID sets the "canonical_id" field.
+func (m *ThreadMutation) SetCanonicalID(s string) {
+	m.canonical_id = &s
+}
+
+// CanonicalID returns the value of the "canonical_id" field in the mutation.
+func (m *ThreadMutation) CanonicalID() (r string, exists bool) {
+	v := m.canonical_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCanonicalID returns the old "canonical_id" field's value of the Thread entity.
+// If the Thread object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ThreadMutation) OldCanonicalID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCanonicalID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCanonicalID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCanonicalID: %w", err)
+	}
+	return oldValue.CanonicalID, nil
+}
+
+// ResetCanonicalID resets all changes to the "canonical_id" field.
+func (m *ThreadMutation) ResetCanonicalID() {
+	m.canonical_id = nil
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (m *ThreadMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -1002,7 +1039,7 @@ func (m *ThreadMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ThreadMutation) Fields() []string {
-	fields := make([]string, 0, 7)
+	fields := make([]string, 0, 8)
 	if m.provider != nil {
 		fields = append(fields, thread.FieldProvider)
 	}
@@ -1017,6 +1054,9 @@ func (m *ThreadMutation) Fields() []string {
 	}
 	if m.source_file_path != nil {
 		fields = append(fields, thread.FieldSourceFilePath)
+	}
+	if m.canonical_id != nil {
+		fields = append(fields, thread.FieldCanonicalID)
 	}
 	if m.created_at != nil {
 		fields = append(fields, thread.FieldCreatedAt)
@@ -1042,6 +1082,8 @@ func (m *ThreadMutation) Field(name string) (ent.Value, bool) {
 		return m.WorkspacePath()
 	case thread.FieldSourceFilePath:
 		return m.SourceFilePath()
+	case thread.FieldCanonicalID:
+		return m.CanonicalID()
 	case thread.FieldCreatedAt:
 		return m.CreatedAt()
 	case thread.FieldLastSyncedAt:
@@ -1065,6 +1107,8 @@ func (m *ThreadMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldWorkspacePath(ctx)
 	case thread.FieldSourceFilePath:
 		return m.OldSourceFilePath(ctx)
+	case thread.FieldCanonicalID:
+		return m.OldCanonicalID(ctx)
 	case thread.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
 	case thread.FieldLastSyncedAt:
@@ -1112,6 +1156,13 @@ func (m *ThreadMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetSourceFilePath(v)
+		return nil
+	case thread.FieldCanonicalID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCanonicalID(v)
 		return nil
 	case thread.FieldCreatedAt:
 		v, ok := value.(time.Time)
@@ -1190,6 +1241,9 @@ func (m *ThreadMutation) ResetField(name string) error {
 		return nil
 	case thread.FieldSourceFilePath:
 		m.ResetSourceFilePath()
+		return nil
+	case thread.FieldCanonicalID:
+		m.ResetCanonicalID()
 		return nil
 	case thread.FieldCreatedAt:
 		m.ResetCreatedAt()

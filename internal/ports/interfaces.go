@@ -25,6 +25,8 @@ type ThreadRepository interface {
 	CountThreads(ctx context.Context) (int, error)
 
 	DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error
+
+	RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error
 }
 
 type ThreadInjector interface {

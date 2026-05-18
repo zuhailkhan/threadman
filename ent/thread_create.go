@@ -54,6 +54,20 @@ func (_c *ThreadCreate) SetSourceFilePath(v string) *ThreadCreate {
 	return _c
 }
 
+// SetCanonicalID sets the "canonical_id" field.
+func (_c *ThreadCreate) SetCanonicalID(v string) *ThreadCreate {
+	_c.mutation.SetCanonicalID(v)
+	return _c
+}
+
+// SetNillableCanonicalID sets the "canonical_id" field if the given value is not nil.
+func (_c *ThreadCreate) SetNillableCanonicalID(v *string) *ThreadCreate {
+	if v != nil {
+		_c.SetCanonicalID(*v)
+	}
+	return _c
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (_c *ThreadCreate) SetCreatedAt(v time.Time) *ThreadCreate {
 	_c.mutation.SetCreatedAt(v)
@@ -94,6 +108,7 @@ func (_c *ThreadCreate) Mutation() *ThreadMutation {
 
 // Save creates the Thread in the database.
 func (_c *ThreadCreate) Save(ctx context.Context) (*Thread, error) {
+	_c.defaults()
 	return withHooks(ctx, _c.sqlSave, _c.mutation, _c.hooks)
 }
 
@@ -119,6 +134,14 @@ func (_c *ThreadCreate) ExecX(ctx context.Context) {
 	}
 }
 
+// defaults sets the default values of the builder before save.
+func (_c *ThreadCreate) defaults() {
+	if _, ok := _c.mutation.CanonicalID(); !ok {
+		v := thread.DefaultCanonicalID
+		_c.mutation.SetCanonicalID(v)
+	}
+}
+
 // check runs all checks and user-defined validators on the builder.
 func (_c *ThreadCreate) check() error {
 	if _, ok := _c.mutation.Provider(); !ok {
@@ -135,6 +158,9 @@ func (_c *ThreadCreate) check() error {
 	}
 	if _, ok := _c.mutation.SourceFilePath(); !ok {
 		return &ValidationError{Name: "source_file_path", err: errors.New(`ent: missing required field "Thread.source_file_path"`)}
+	}
+	if _, ok := _c.mutation.CanonicalID(); !ok {
+		return &ValidationError{Name: "canonical_id", err: errors.New(`ent: missing required field "Thread.canonical_id"`)}
 	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "Thread.created_at"`)}
@@ -197,6 +223,10 @@ func (_c *ThreadCreate) createSpec() (*Thread, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.SourceFilePath(); ok {
 		_spec.SetField(thread.FieldSourceFilePath, field.TypeString, value)
 		_node.SourceFilePath = value
+	}
+	if value, ok := _c.mutation.CanonicalID(); ok {
+		_spec.SetField(thread.FieldCanonicalID, field.TypeString, value)
+		_node.CanonicalID = value
 	}
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(thread.FieldCreatedAt, field.TypeTime, value)
@@ -331,6 +361,18 @@ func (u *ThreadUpsert) SetSourceFilePath(v string) *ThreadUpsert {
 // UpdateSourceFilePath sets the "source_file_path" field to the value that was provided on create.
 func (u *ThreadUpsert) UpdateSourceFilePath() *ThreadUpsert {
 	u.SetExcluded(thread.FieldSourceFilePath)
+	return u
+}
+
+// SetCanonicalID sets the "canonical_id" field.
+func (u *ThreadUpsert) SetCanonicalID(v string) *ThreadUpsert {
+	u.Set(thread.FieldCanonicalID, v)
+	return u
+}
+
+// UpdateCanonicalID sets the "canonical_id" field to the value that was provided on create.
+func (u *ThreadUpsert) UpdateCanonicalID() *ThreadUpsert {
+	u.SetExcluded(thread.FieldCanonicalID)
 	return u
 }
 
@@ -476,6 +518,20 @@ func (u *ThreadUpsertOne) UpdateSourceFilePath() *ThreadUpsertOne {
 	})
 }
 
+// SetCanonicalID sets the "canonical_id" field.
+func (u *ThreadUpsertOne) SetCanonicalID(v string) *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetCanonicalID(v)
+	})
+}
+
+// UpdateCanonicalID sets the "canonical_id" field to the value that was provided on create.
+func (u *ThreadUpsertOne) UpdateCanonicalID() *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateCanonicalID()
+	})
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (u *ThreadUpsertOne) SetCreatedAt(v time.Time) *ThreadUpsertOne {
 	return u.Update(func(s *ThreadUpsert) {
@@ -561,6 +617,7 @@ func (_c *ThreadCreateBulk) Save(ctx context.Context) ([]*Thread, error) {
 	for i := range _c.builders {
 		func(i int, root context.Context) {
 			builder := _c.builders[i]
+			builder.defaults()
 			var mut Mutator = MutateFunc(func(ctx context.Context, m Mutation) (Value, error) {
 				mutation, ok := m.(*ThreadMutation)
 				if !ok {
@@ -785,6 +842,20 @@ func (u *ThreadUpsertBulk) SetSourceFilePath(v string) *ThreadUpsertBulk {
 func (u *ThreadUpsertBulk) UpdateSourceFilePath() *ThreadUpsertBulk {
 	return u.Update(func(s *ThreadUpsert) {
 		s.UpdateSourceFilePath()
+	})
+}
+
+// SetCanonicalID sets the "canonical_id" field.
+func (u *ThreadUpsertBulk) SetCanonicalID(v string) *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetCanonicalID(v)
+	})
+}
+
+// UpdateCanonicalID sets the "canonical_id" field to the value that was provided on create.
+func (u *ThreadUpsertBulk) UpdateCanonicalID() *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateCanonicalID()
 	})
 }
 

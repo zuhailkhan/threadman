@@ -2,8 +2,19 @@
 
 package ent
 
+import (
+	"github.com/zuhailkhan/threadman/ent/schema"
+	"github.com/zuhailkhan/threadman/ent/thread"
+)
+
 // The init function reads all schema descriptors with runtime code
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
+	threadFields := schema.Thread{}.Fields()
+	_ = threadFields
+	// threadDescCanonicalID is the schema descriptor for canonical_id field.
+	threadDescCanonicalID := threadFields[6].Descriptor()
+	// thread.DefaultCanonicalID holds the default value on creation for the canonical_id field.
+	thread.DefaultCanonicalID = threadDescCanonicalID.Default.(string)
 }

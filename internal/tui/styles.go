@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 var (
 	colorClaude   = lipgloss.Color("#4A90E2")
@@ -33,6 +37,22 @@ var (
 	styleYou       = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
 	styleAssistant = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
 )
+
+func providerIcon(name string) string {
+	switch name {
+	case "claude":
+		return "C"
+	case "gemini":
+		return "G"
+	case "opencode":
+		return "O"
+	default:
+		if len(name) > 0 {
+			return strings.ToUpper(name[:1])
+		}
+		return "?"
+	}
+}
 
 func providerStyle(name string) lipgloss.Style {
 	var color lipgloss.Color

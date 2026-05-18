@@ -90,6 +90,11 @@ func SourceFilePath(v string) predicate.Thread {
 	return predicate.Thread(sql.FieldEQ(FieldSourceFilePath, v))
 }
 
+// CanonicalID applies equality check predicate on the "canonical_id" field. It's identical to CanonicalIDEQ.
+func CanonicalID(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldCanonicalID, v))
+}
+
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
 func CreatedAt(v time.Time) predicate.Thread {
 	return predicate.Thread(sql.FieldEQ(FieldCreatedAt, v))
@@ -423,6 +428,71 @@ func SourceFilePathEqualFold(v string) predicate.Thread {
 // SourceFilePathContainsFold applies the ContainsFold predicate on the "source_file_path" field.
 func SourceFilePathContainsFold(v string) predicate.Thread {
 	return predicate.Thread(sql.FieldContainsFold(FieldSourceFilePath, v))
+}
+
+// CanonicalIDEQ applies the EQ predicate on the "canonical_id" field.
+func CanonicalIDEQ(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldCanonicalID, v))
+}
+
+// CanonicalIDNEQ applies the NEQ predicate on the "canonical_id" field.
+func CanonicalIDNEQ(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldNEQ(FieldCanonicalID, v))
+}
+
+// CanonicalIDIn applies the In predicate on the "canonical_id" field.
+func CanonicalIDIn(vs ...string) predicate.Thread {
+	return predicate.Thread(sql.FieldIn(FieldCanonicalID, vs...))
+}
+
+// CanonicalIDNotIn applies the NotIn predicate on the "canonical_id" field.
+func CanonicalIDNotIn(vs ...string) predicate.Thread {
+	return predicate.Thread(sql.FieldNotIn(FieldCanonicalID, vs...))
+}
+
+// CanonicalIDGT applies the GT predicate on the "canonical_id" field.
+func CanonicalIDGT(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldGT(FieldCanonicalID, v))
+}
+
+// CanonicalIDGTE applies the GTE predicate on the "canonical_id" field.
+func CanonicalIDGTE(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldGTE(FieldCanonicalID, v))
+}
+
+// CanonicalIDLT applies the LT predicate on the "canonical_id" field.
+func CanonicalIDLT(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldLT(FieldCanonicalID, v))
+}
+
+// CanonicalIDLTE applies the LTE predicate on the "canonical_id" field.
+func CanonicalIDLTE(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldLTE(FieldCanonicalID, v))
+}
+
+// CanonicalIDContains applies the Contains predicate on the "canonical_id" field.
+func CanonicalIDContains(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldContains(FieldCanonicalID, v))
+}
+
+// CanonicalIDHasPrefix applies the HasPrefix predicate on the "canonical_id" field.
+func CanonicalIDHasPrefix(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldHasPrefix(FieldCanonicalID, v))
+}
+
+// CanonicalIDHasSuffix applies the HasSuffix predicate on the "canonical_id" field.
+func CanonicalIDHasSuffix(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldHasSuffix(FieldCanonicalID, v))
+}
+
+// CanonicalIDEqualFold applies the EqualFold predicate on the "canonical_id" field.
+func CanonicalIDEqualFold(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldEqualFold(FieldCanonicalID, v))
+}
+
+// CanonicalIDContainsFold applies the ContainsFold predicate on the "canonical_id" field.
+func CanonicalIDContainsFold(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldContainsFold(FieldCanonicalID, v))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

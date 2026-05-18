@@ -129,6 +129,10 @@ func (s *Service) ProviderNames() []string {
 	return names
 }
 
+func (s *Service) RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error {
+	return s.repo.RecordHandoff(ctx, source, targetProvider, targetOriginalID)
+}
+
 func (s *Service) CountThreads(ctx context.Context) (int, error) {
 	return s.repo.CountThreads(ctx)
 }

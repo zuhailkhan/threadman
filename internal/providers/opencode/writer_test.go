@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,26 +20,42 @@ func setupTestDB(t *testing.T) (string, *sql.DB) {
 		t.Fatal(err)
 	}
 	_, err = db.Exec(`
+        CREATE TABLE project (
+            id TEXT PRIMARY KEY,
+            worktree TEXT NOT NULL,
+            sandboxes TEXT NOT NULL DEFAULT '[]',
+            time_created INTEGER NOT NULL DEFAULT 0,
+            time_updated INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO project (id, worktree) VALUES ('global', '/');
         CREATE TABLE session (
             id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            version TEXT NOT NULL DEFAULT '',
             title TEXT NOT NULL,
             directory TEXT NOT NULL,
             time_created INTEGER NOT NULL,
             time_updated INTEGER NOT NULL,
-            parent_id TEXT
+            parent_id TEXT,
+            FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE
         );
         CREATE TABLE message (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
             data TEXT NOT NULL,
-            time_created INTEGER NOT NULL
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE
         );
         CREATE TABLE part (
             id TEXT PRIMARY KEY,
             message_id TEXT NOT NULL,
             session_id TEXT NOT NULL,
             data TEXT NOT NULL,
-            time_created INTEGER NOT NULL
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            FOREIGN KEY (message_id) REFERENCES message(id) ON DELETE CASCADE
         );
     `)
 	if err != nil {
@@ -97,11 +114,39 @@ func TestOpenCodeWriterRoundTrip(t *testing.T) {
 
 func TestOpenCodeWriterOpenCommand(t *testing.T) {
 	w := &Writer{dbPath: "/tmp/test.db"}
-	cmd := w.OpenCommand("any-id", "/home/user/proj")
+	sessionID := "ses_abc123"
+	cmd := w.OpenCommand(sessionID, "/home/user/proj")
 	if cmd.Dir != "/home/user/proj" {
 		t.Errorf("Dir: got %q, want %q", cmd.Dir, "/home/user/proj")
 	}
-	if cmd.Args[0] != "opencode" {
-		t.Errorf("Args[0]: got %q, want opencode", cmd.Args[0])
+	if len(cmd.Args) < 3 {
+		t.Fatalf("expected at least 3 args, got %d: %v", len(cmd.Args), cmd.Args)
+	}
+	if cmd.Args[1] != "-s" {
+		t.Errorf("Args[1]: got %q, want -s", cmd.Args[1])
+	}
+	if cmd.Args[2] != sessionID {
+		t.Errorf("Args[2]: got %q, want %q", cmd.Args[2], sessionID)
+	}
+}
+
+func TestOpenCodeWriterSessionIDFormat(t *testing.T) {
+	dbPath, db := setupTestDB(t)
+	defer db.Close()
+	w := &Writer{dbPath: dbPath}
+	thread := domain.Thread{
+		Provider:      "opencode",
+		Title:         "format test",
+		WorkspacePath: "/ws",
+		Messages: []domain.Message{
+			{ID: "m1", Role: domain.RoleUser, Content: "hello", Timestamp: time.Now()},
+		},
+	}
+	sessionID, err := w.WriteThread(context.Background(), thread)
+	if err != nil {
+		t.Fatalf("WriteThread: %v", err)
+	}
+	if !strings.HasPrefix(sessionID, "ses_") {
+		t.Errorf("session ID %q does not start with ses_", sessionID)
 	}
 }

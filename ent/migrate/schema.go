@@ -38,6 +38,7 @@ var (
 		{Name: "title", Type: field.TypeString},
 		{Name: "workspace_path", Type: field.TypeString},
 		{Name: "source_file_path", Type: field.TypeString},
+		{Name: "canonical_id", Type: field.TypeString, Default: ""},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "last_synced_at", Type: field.TypeTime},
 	}
