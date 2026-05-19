@@ -36,6 +36,7 @@ var (
 
 	styleYou       = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
 	styleAssistant = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
+	styleArchived  = lipgloss.NewStyle().Foreground(colorDim)
 )
 
 func providerIcon(name string) string {

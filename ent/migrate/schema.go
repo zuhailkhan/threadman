@@ -41,6 +41,10 @@ var (
 		{Name: "canonical_id", Type: field.TypeString, Default: ""},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "last_synced_at", Type: field.TypeTime},
+		{Name: "custom_title", Type: field.TypeString, Default: ""},
+		{Name: "archived", Type: field.TypeBool, Default: false},
+		{Name: "deleted", Type: field.TypeBool, Default: false},
+		{Name: "deleted_hash", Type: field.TypeString, Default: ""},
 	}
 	// ThreadsTable holds the schema information for the "threads" table.
 	ThreadsTable = &schema.Table{

@@ -150,3 +150,68 @@ func TestOpenCodeWriterSessionIDFormat(t *testing.T) {
 		t.Errorf("session ID %q does not start with ses_", sessionID)
 	}
 }
+
+func TestOpenCodeWriterDeleteThread(t *testing.T) {
+	dbPath, db := setupTestDB(t)
+	defer db.Close()
+
+	w := &Writer{dbPath: dbPath}
+
+	thread := domain.Thread{
+		Provider:       "opencode",
+		Title:          "to delete",
+		WorkspacePath:  "/home/user/proj",
+		SourceFilePath: dbPath,
+		Messages: []domain.Message{
+			{ID: "m1", Role: domain.RoleUser, Content: "hello", Timestamp: time.Now()},
+		},
+	}
+
+	sessionID, err := w.WriteThread(context.Background(), thread)
+	if err != nil {
+		t.Fatalf("WriteThread: %v", err)
+	}
+	thread.OriginalID = sessionID
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM session WHERE id = ?`, sessionID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected session to exist before delete, got count %d", count)
+	}
+
+	if err := w.DeleteThread(context.Background(), thread); err != nil {
+		t.Fatalf("DeleteThread: %v", err)
+	}
+
+	if err := db.QueryRow(`SELECT COUNT(*) FROM session WHERE id = ?`, sessionID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("expected session to be deleted, count = %d", count)
+	}
+
+	if err := db.QueryRow(`SELECT COUNT(*) FROM message WHERE session_id = ?`, sessionID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("expected messages to be deleted (cascade), count = %d", count)
+	}
+}
+
+func TestOpenCodeWriterDeleteThreadNotFound(t *testing.T) {
+	dbPath, db := setupTestDB(t)
+	defer db.Close()
+
+	w := &Writer{dbPath: dbPath}
+	thread := domain.Thread{
+		SourceFilePath: dbPath,
+		OriginalID:     "ses_doesnotexist",
+	}
+
+	err := w.DeleteThread(context.Background(), thread)
+	if err != nil {
+		t.Errorf("expected nil error for missing session (delete is idempotent), got: %v", err)
+	}
+}

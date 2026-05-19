@@ -156,6 +156,21 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 	return sessionID, nil
 }
 
+func (w *Writer) DeleteThread(ctx context.Context, thread domain.Thread) error {
+	db, err := sql.Open("sqlite3", thread.SourceFilePath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		return fmt.Errorf("enable foreign keys: %w", err)
+	}
+
+	_, err = db.ExecContext(ctx, `DELETE FROM session WHERE id = ?`, thread.OriginalID)
+	return err
+}
+
 func (w *Writer) OpenCommand(sessionID string, workspacePath string) *exec.Cmd {
 	cmd := exec.Command("opencode", "-s", sessionID)
 	cmd.Dir = workspacePath

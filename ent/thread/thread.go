@@ -28,6 +28,14 @@ const (
 	FieldCreatedAt = "created_at"
 	// FieldLastSyncedAt holds the string denoting the last_synced_at field in the database.
 	FieldLastSyncedAt = "last_synced_at"
+	// FieldCustomTitle holds the string denoting the custom_title field in the database.
+	FieldCustomTitle = "custom_title"
+	// FieldArchived holds the string denoting the archived field in the database.
+	FieldArchived = "archived"
+	// FieldDeleted holds the string denoting the deleted field in the database.
+	FieldDeleted = "deleted"
+	// FieldDeletedHash holds the string denoting the deleted_hash field in the database.
+	FieldDeletedHash = "deleted_hash"
 	// EdgeMessages holds the string denoting the messages edge name in mutations.
 	EdgeMessages = "messages"
 	// Table holds the table name of the thread in the database.
@@ -52,6 +60,10 @@ var Columns = []string{
 	FieldCanonicalID,
 	FieldCreatedAt,
 	FieldLastSyncedAt,
+	FieldCustomTitle,
+	FieldArchived,
+	FieldDeleted,
+	FieldDeletedHash,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -67,6 +79,14 @@ func ValidColumn(column string) bool {
 var (
 	// DefaultCanonicalID holds the default value on creation for the "canonical_id" field.
 	DefaultCanonicalID string
+	// DefaultCustomTitle holds the default value on creation for the "custom_title" field.
+	DefaultCustomTitle string
+	// DefaultArchived holds the default value on creation for the "archived" field.
+	DefaultArchived bool
+	// DefaultDeleted holds the default value on creation for the "deleted" field.
+	DefaultDeleted bool
+	// DefaultDeletedHash holds the default value on creation for the "deleted_hash" field.
+	DefaultDeletedHash string
 )
 
 // OrderOption defines the ordering options for the Thread queries.
@@ -115,6 +135,26 @@ func ByCreatedAt(opts ...sql.OrderTermOption) OrderOption {
 // ByLastSyncedAt orders the results by the last_synced_at field.
 func ByLastSyncedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLastSyncedAt, opts...).ToFunc()
+}
+
+// ByCustomTitle orders the results by the custom_title field.
+func ByCustomTitle(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCustomTitle, opts...).ToFunc()
+}
+
+// ByArchived orders the results by the archived field.
+func ByArchived(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldArchived, opts...).ToFunc()
+}
+
+// ByDeleted orders the results by the deleted field.
+func ByDeleted(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDeleted, opts...).ToFunc()
+}
+
+// ByDeletedHash orders the results by the deleted_hash field.
+func ByDeletedHash(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDeletedHash, opts...).ToFunc()
 }
 
 // ByMessagesCount orders the results by messages count.

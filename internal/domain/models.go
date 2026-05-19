@@ -26,6 +26,8 @@ type Thread struct {
 
 	Title string `json:"title"`
 
+	CustomTitle string `json:"custom_title"`
+
 	WorkspacePath string `json:"workspace_path"`
 
 	SourceFilePath string `json:"source_file_path"`
@@ -37,4 +39,6 @@ type Thread struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	LastSyncedAt time.Time `json:"last_synced_at"`
+
+	Archived bool `json:"archived"`
 }

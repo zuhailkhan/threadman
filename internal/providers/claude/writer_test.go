@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -75,5 +76,49 @@ func TestClaudeWriterOpenCommand(t *testing.T) {
 	}
 	if cmd.Args[2] != "abc-123" {
 		t.Errorf("Args[2]: got %q, want abc-123", cmd.Args[2])
+	}
+}
+
+func TestClaudeWriterDeleteThread(t *testing.T) {
+	dir := t.TempDir()
+	w := &Writer{baseDir: dir}
+
+	thread := domain.Thread{
+		Provider:      "claude",
+		WorkspacePath: "/home/user/myproject",
+		Messages: []domain.Message{
+			{ID: "m1", Role: domain.RoleUser, Content: "hello", Timestamp: time.Now()},
+		},
+	}
+
+	sessionID, err := w.WriteThread(context.Background(), thread)
+	if err != nil {
+		t.Fatalf("WriteThread: %v", err)
+	}
+
+	encodedWS := url.PathEscape(thread.WorkspacePath)
+	filePath := filepath.Join(dir, encodedWS, sessionID+".jsonl")
+	thread.SourceFilePath = filePath
+
+	if err := w.DeleteThread(context.Background(), thread); err != nil {
+		t.Fatalf("DeleteThread: %v", err)
+	}
+
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Errorf("expected file to be deleted, stat err: %v", err)
+	}
+}
+
+func TestClaudeWriterDeleteThreadMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	w := &Writer{baseDir: dir}
+
+	thread := domain.Thread{
+		SourceFilePath: filepath.Join(dir, "nonexistent.jsonl"),
+	}
+
+	err := w.DeleteThread(context.Background(), thread)
+	if err == nil {
+		t.Error("expected error deleting nonexistent file, got nil")
 	}
 }

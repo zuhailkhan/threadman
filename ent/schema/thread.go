@@ -21,6 +21,10 @@ func (Thread) Fields() []ent.Field {
 		field.String("canonical_id").Default(""),
 		field.Time("created_at"),
 		field.Time("last_synced_at"),
+		field.String("custom_title").Default(""),
+		field.Bool("archived").Default(false),
+		field.Bool("deleted").Default(false),
+		field.String("deleted_hash").Default(""),
 	}
 }
 

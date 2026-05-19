@@ -27,7 +27,7 @@ func newShowCmd(svc *syncsvc.Service) *cobra.Command {
 				return fmt.Errorf("argument must be a positive number from 'threadman list'")
 			}
 
-			threads, err := svc.ListThreads(ctx, "")
+			threads, err := svc.ListThreads(ctx, "", false)
 			if err != nil {
 				return err
 			}
