@@ -96,3 +96,7 @@ func (w *Writer) OpenCommand(sessionID string, workspacePath string) *exec.Cmd {
 	cmd.Dir = workspacePath
 	return cmd
 }
+
+func (w *Writer) DeleteThread(ctx context.Context, thread domain.Thread) error {
+	return os.Remove(thread.SourceFilePath)
+}

@@ -80,3 +80,52 @@ func TestGeminiWriterOpenCommand(t *testing.T) {
 		t.Errorf("Args[2]: got %q, want abc-uuid", cmd.Args[2])
 	}
 }
+
+func TestGeminiWriterDeleteThread(t *testing.T) {
+	dir := t.TempDir()
+	w := &Writer{baseDir: dir}
+
+	thread := domain.Thread{
+		Provider:      "gemini",
+		WorkspacePath: "/home/user/myproject",
+		Messages: []domain.Message{
+			{ID: "m1", Role: domain.RoleUser, Content: "hello", Timestamp: time.Now()},
+		},
+	}
+
+	sessionID, err := w.WriteThread(context.Background(), thread)
+	if err != nil {
+		t.Fatalf("WriteThread: %v", err)
+	}
+	_ = sessionID
+
+	chatsDir := filepath.Join(dir, filepath.Base(thread.WorkspacePath), "chats")
+	entries, err := os.ReadDir(chatsDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected 1 file in chats dir")
+	}
+	filePath := filepath.Join(chatsDir, entries[0].Name())
+	thread.SourceFilePath = filePath
+
+	if err := w.DeleteThread(context.Background(), thread); err != nil {
+		t.Fatalf("DeleteThread: %v", err)
+	}
+
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Errorf("expected file to be deleted, stat err: %v", err)
+	}
+}
+
+func TestGeminiWriterDeleteThreadMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	w := &Writer{baseDir: dir}
+
+	thread := domain.Thread{
+		SourceFilePath: filepath.Join(dir, "nonexistent.jsonl"),
+	}
+
+	err := w.DeleteThread(context.Background(), thread)
+	if err == nil {
+		t.Error("expected error deleting nonexistent file, got nil")
+	}
+}

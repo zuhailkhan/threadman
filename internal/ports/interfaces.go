@@ -18,7 +18,7 @@ type ThreadProvider interface {
 type ThreadRepository interface {
 	UpsertThread(ctx context.Context, thread domain.Thread) error
 
-	ListThreads(ctx context.Context, provider string) ([]domain.Thread, error)
+	ListThreads(ctx context.Context, provider string, includeArchived bool) ([]domain.Thread, error)
 
 	SearchMessages(ctx context.Context, query string) ([]domain.Thread, error)
 
@@ -27,6 +27,14 @@ type ThreadRepository interface {
 	DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error
 
 	RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error
+
+	MarkThreadDeleted(ctx context.Context, id, hash string) error
+
+	ArchiveThreadGroup(ctx context.Context, canonicalID string) error
+
+	UnarchiveThreadGroup(ctx context.Context, canonicalID string) error
+
+	RenameThreadGroup(ctx context.Context, canonicalID, customTitle string) error
 }
 
 type ThreadInjector interface {
@@ -47,4 +55,5 @@ type ThreadWriter interface {
 	Name() string
 	WriteThread(ctx context.Context, thread domain.Thread) (string, error)
 	OpenCommand(sessionID string, workspacePath string) *exec.Cmd
+	DeleteThread(ctx context.Context, thread domain.Thread) error
 }

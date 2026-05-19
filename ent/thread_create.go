@@ -80,6 +80,62 @@ func (_c *ThreadCreate) SetLastSyncedAt(v time.Time) *ThreadCreate {
 	return _c
 }
 
+// SetCustomTitle sets the "custom_title" field.
+func (_c *ThreadCreate) SetCustomTitle(v string) *ThreadCreate {
+	_c.mutation.SetCustomTitle(v)
+	return _c
+}
+
+// SetNillableCustomTitle sets the "custom_title" field if the given value is not nil.
+func (_c *ThreadCreate) SetNillableCustomTitle(v *string) *ThreadCreate {
+	if v != nil {
+		_c.SetCustomTitle(*v)
+	}
+	return _c
+}
+
+// SetArchived sets the "archived" field.
+func (_c *ThreadCreate) SetArchived(v bool) *ThreadCreate {
+	_c.mutation.SetArchived(v)
+	return _c
+}
+
+// SetNillableArchived sets the "archived" field if the given value is not nil.
+func (_c *ThreadCreate) SetNillableArchived(v *bool) *ThreadCreate {
+	if v != nil {
+		_c.SetArchived(*v)
+	}
+	return _c
+}
+
+// SetDeleted sets the "deleted" field.
+func (_c *ThreadCreate) SetDeleted(v bool) *ThreadCreate {
+	_c.mutation.SetDeleted(v)
+	return _c
+}
+
+// SetNillableDeleted sets the "deleted" field if the given value is not nil.
+func (_c *ThreadCreate) SetNillableDeleted(v *bool) *ThreadCreate {
+	if v != nil {
+		_c.SetDeleted(*v)
+	}
+	return _c
+}
+
+// SetDeletedHash sets the "deleted_hash" field.
+func (_c *ThreadCreate) SetDeletedHash(v string) *ThreadCreate {
+	_c.mutation.SetDeletedHash(v)
+	return _c
+}
+
+// SetNillableDeletedHash sets the "deleted_hash" field if the given value is not nil.
+func (_c *ThreadCreate) SetNillableDeletedHash(v *string) *ThreadCreate {
+	if v != nil {
+		_c.SetDeletedHash(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *ThreadCreate) SetID(v string) *ThreadCreate {
 	_c.mutation.SetID(v)
@@ -140,6 +196,22 @@ func (_c *ThreadCreate) defaults() {
 		v := thread.DefaultCanonicalID
 		_c.mutation.SetCanonicalID(v)
 	}
+	if _, ok := _c.mutation.CustomTitle(); !ok {
+		v := thread.DefaultCustomTitle
+		_c.mutation.SetCustomTitle(v)
+	}
+	if _, ok := _c.mutation.Archived(); !ok {
+		v := thread.DefaultArchived
+		_c.mutation.SetArchived(v)
+	}
+	if _, ok := _c.mutation.Deleted(); !ok {
+		v := thread.DefaultDeleted
+		_c.mutation.SetDeleted(v)
+	}
+	if _, ok := _c.mutation.DeletedHash(); !ok {
+		v := thread.DefaultDeletedHash
+		_c.mutation.SetDeletedHash(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -167,6 +239,18 @@ func (_c *ThreadCreate) check() error {
 	}
 	if _, ok := _c.mutation.LastSyncedAt(); !ok {
 		return &ValidationError{Name: "last_synced_at", err: errors.New(`ent: missing required field "Thread.last_synced_at"`)}
+	}
+	if _, ok := _c.mutation.CustomTitle(); !ok {
+		return &ValidationError{Name: "custom_title", err: errors.New(`ent: missing required field "Thread.custom_title"`)}
+	}
+	if _, ok := _c.mutation.Archived(); !ok {
+		return &ValidationError{Name: "archived", err: errors.New(`ent: missing required field "Thread.archived"`)}
+	}
+	if _, ok := _c.mutation.Deleted(); !ok {
+		return &ValidationError{Name: "deleted", err: errors.New(`ent: missing required field "Thread.deleted"`)}
+	}
+	if _, ok := _c.mutation.DeletedHash(); !ok {
+		return &ValidationError{Name: "deleted_hash", err: errors.New(`ent: missing required field "Thread.deleted_hash"`)}
 	}
 	return nil
 }
@@ -235,6 +319,22 @@ func (_c *ThreadCreate) createSpec() (*Thread, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.LastSyncedAt(); ok {
 		_spec.SetField(thread.FieldLastSyncedAt, field.TypeTime, value)
 		_node.LastSyncedAt = value
+	}
+	if value, ok := _c.mutation.CustomTitle(); ok {
+		_spec.SetField(thread.FieldCustomTitle, field.TypeString, value)
+		_node.CustomTitle = value
+	}
+	if value, ok := _c.mutation.Archived(); ok {
+		_spec.SetField(thread.FieldArchived, field.TypeBool, value)
+		_node.Archived = value
+	}
+	if value, ok := _c.mutation.Deleted(); ok {
+		_spec.SetField(thread.FieldDeleted, field.TypeBool, value)
+		_node.Deleted = value
+	}
+	if value, ok := _c.mutation.DeletedHash(); ok {
+		_spec.SetField(thread.FieldDeletedHash, field.TypeString, value)
+		_node.DeletedHash = value
 	}
 	if nodes := _c.mutation.MessagesIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -400,6 +500,54 @@ func (u *ThreadUpsert) UpdateLastSyncedAt() *ThreadUpsert {
 	return u
 }
 
+// SetCustomTitle sets the "custom_title" field.
+func (u *ThreadUpsert) SetCustomTitle(v string) *ThreadUpsert {
+	u.Set(thread.FieldCustomTitle, v)
+	return u
+}
+
+// UpdateCustomTitle sets the "custom_title" field to the value that was provided on create.
+func (u *ThreadUpsert) UpdateCustomTitle() *ThreadUpsert {
+	u.SetExcluded(thread.FieldCustomTitle)
+	return u
+}
+
+// SetArchived sets the "archived" field.
+func (u *ThreadUpsert) SetArchived(v bool) *ThreadUpsert {
+	u.Set(thread.FieldArchived, v)
+	return u
+}
+
+// UpdateArchived sets the "archived" field to the value that was provided on create.
+func (u *ThreadUpsert) UpdateArchived() *ThreadUpsert {
+	u.SetExcluded(thread.FieldArchived)
+	return u
+}
+
+// SetDeleted sets the "deleted" field.
+func (u *ThreadUpsert) SetDeleted(v bool) *ThreadUpsert {
+	u.Set(thread.FieldDeleted, v)
+	return u
+}
+
+// UpdateDeleted sets the "deleted" field to the value that was provided on create.
+func (u *ThreadUpsert) UpdateDeleted() *ThreadUpsert {
+	u.SetExcluded(thread.FieldDeleted)
+	return u
+}
+
+// SetDeletedHash sets the "deleted_hash" field.
+func (u *ThreadUpsert) SetDeletedHash(v string) *ThreadUpsert {
+	u.Set(thread.FieldDeletedHash, v)
+	return u
+}
+
+// UpdateDeletedHash sets the "deleted_hash" field to the value that was provided on create.
+func (u *ThreadUpsert) UpdateDeletedHash() *ThreadUpsert {
+	u.SetExcluded(thread.FieldDeletedHash)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create except the ID field.
 // Using this option is equivalent to using:
 //
@@ -557,6 +705,62 @@ func (u *ThreadUpsertOne) SetLastSyncedAt(v time.Time) *ThreadUpsertOne {
 func (u *ThreadUpsertOne) UpdateLastSyncedAt() *ThreadUpsertOne {
 	return u.Update(func(s *ThreadUpsert) {
 		s.UpdateLastSyncedAt()
+	})
+}
+
+// SetCustomTitle sets the "custom_title" field.
+func (u *ThreadUpsertOne) SetCustomTitle(v string) *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetCustomTitle(v)
+	})
+}
+
+// UpdateCustomTitle sets the "custom_title" field to the value that was provided on create.
+func (u *ThreadUpsertOne) UpdateCustomTitle() *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateCustomTitle()
+	})
+}
+
+// SetArchived sets the "archived" field.
+func (u *ThreadUpsertOne) SetArchived(v bool) *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetArchived(v)
+	})
+}
+
+// UpdateArchived sets the "archived" field to the value that was provided on create.
+func (u *ThreadUpsertOne) UpdateArchived() *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateArchived()
+	})
+}
+
+// SetDeleted sets the "deleted" field.
+func (u *ThreadUpsertOne) SetDeleted(v bool) *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetDeleted(v)
+	})
+}
+
+// UpdateDeleted sets the "deleted" field to the value that was provided on create.
+func (u *ThreadUpsertOne) UpdateDeleted() *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateDeleted()
+	})
+}
+
+// SetDeletedHash sets the "deleted_hash" field.
+func (u *ThreadUpsertOne) SetDeletedHash(v string) *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetDeletedHash(v)
+	})
+}
+
+// UpdateDeletedHash sets the "deleted_hash" field to the value that was provided on create.
+func (u *ThreadUpsertOne) UpdateDeletedHash() *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateDeletedHash()
 	})
 }
 
@@ -884,6 +1088,62 @@ func (u *ThreadUpsertBulk) SetLastSyncedAt(v time.Time) *ThreadUpsertBulk {
 func (u *ThreadUpsertBulk) UpdateLastSyncedAt() *ThreadUpsertBulk {
 	return u.Update(func(s *ThreadUpsert) {
 		s.UpdateLastSyncedAt()
+	})
+}
+
+// SetCustomTitle sets the "custom_title" field.
+func (u *ThreadUpsertBulk) SetCustomTitle(v string) *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetCustomTitle(v)
+	})
+}
+
+// UpdateCustomTitle sets the "custom_title" field to the value that was provided on create.
+func (u *ThreadUpsertBulk) UpdateCustomTitle() *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateCustomTitle()
+	})
+}
+
+// SetArchived sets the "archived" field.
+func (u *ThreadUpsertBulk) SetArchived(v bool) *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetArchived(v)
+	})
+}
+
+// UpdateArchived sets the "archived" field to the value that was provided on create.
+func (u *ThreadUpsertBulk) UpdateArchived() *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateArchived()
+	})
+}
+
+// SetDeleted sets the "deleted" field.
+func (u *ThreadUpsertBulk) SetDeleted(v bool) *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetDeleted(v)
+	})
+}
+
+// UpdateDeleted sets the "deleted" field to the value that was provided on create.
+func (u *ThreadUpsertBulk) UpdateDeleted() *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateDeleted()
+	})
+}
+
+// SetDeletedHash sets the "deleted_hash" field.
+func (u *ThreadUpsertBulk) SetDeletedHash(v string) *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetDeletedHash(v)
+	})
+}
+
+// UpdateDeletedHash sets the "deleted_hash" field to the value that was provided on create.
+func (u *ThreadUpsertBulk) UpdateDeletedHash() *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateDeletedHash()
 	})
 }
 

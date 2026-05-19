@@ -20,7 +20,7 @@ func newListCmd(svc *syncsvc.Service) *cobra.Command {
 		Short: "List synced threads",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			threads, err := svc.ListThreads(ctx, provider)
+			threads, err := svc.ListThreads(ctx, provider, false)
 			if err != nil {
 				return err
 			}

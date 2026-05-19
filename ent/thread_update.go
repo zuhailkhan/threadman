@@ -141,6 +141,62 @@ func (_u *ThreadUpdate) SetNillableLastSyncedAt(v *time.Time) *ThreadUpdate {
 	return _u
 }
 
+// SetCustomTitle sets the "custom_title" field.
+func (_u *ThreadUpdate) SetCustomTitle(v string) *ThreadUpdate {
+	_u.mutation.SetCustomTitle(v)
+	return _u
+}
+
+// SetNillableCustomTitle sets the "custom_title" field if the given value is not nil.
+func (_u *ThreadUpdate) SetNillableCustomTitle(v *string) *ThreadUpdate {
+	if v != nil {
+		_u.SetCustomTitle(*v)
+	}
+	return _u
+}
+
+// SetArchived sets the "archived" field.
+func (_u *ThreadUpdate) SetArchived(v bool) *ThreadUpdate {
+	_u.mutation.SetArchived(v)
+	return _u
+}
+
+// SetNillableArchived sets the "archived" field if the given value is not nil.
+func (_u *ThreadUpdate) SetNillableArchived(v *bool) *ThreadUpdate {
+	if v != nil {
+		_u.SetArchived(*v)
+	}
+	return _u
+}
+
+// SetDeleted sets the "deleted" field.
+func (_u *ThreadUpdate) SetDeleted(v bool) *ThreadUpdate {
+	_u.mutation.SetDeleted(v)
+	return _u
+}
+
+// SetNillableDeleted sets the "deleted" field if the given value is not nil.
+func (_u *ThreadUpdate) SetNillableDeleted(v *bool) *ThreadUpdate {
+	if v != nil {
+		_u.SetDeleted(*v)
+	}
+	return _u
+}
+
+// SetDeletedHash sets the "deleted_hash" field.
+func (_u *ThreadUpdate) SetDeletedHash(v string) *ThreadUpdate {
+	_u.mutation.SetDeletedHash(v)
+	return _u
+}
+
+// SetNillableDeletedHash sets the "deleted_hash" field if the given value is not nil.
+func (_u *ThreadUpdate) SetNillableDeletedHash(v *string) *ThreadUpdate {
+	if v != nil {
+		_u.SetDeletedHash(*v)
+	}
+	return _u
+}
+
 // AddMessageIDs adds the "messages" edge to the Message entity by IDs.
 func (_u *ThreadUpdate) AddMessageIDs(ids ...string) *ThreadUpdate {
 	_u.mutation.AddMessageIDs(ids...)
@@ -241,6 +297,18 @@ func (_u *ThreadUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.LastSyncedAt(); ok {
 		_spec.SetField(thread.FieldLastSyncedAt, field.TypeTime, value)
+	}
+	if value, ok := _u.mutation.CustomTitle(); ok {
+		_spec.SetField(thread.FieldCustomTitle, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Archived(); ok {
+		_spec.SetField(thread.FieldArchived, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.Deleted(); ok {
+		_spec.SetField(thread.FieldDeleted, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.DeletedHash(); ok {
+		_spec.SetField(thread.FieldDeletedHash, field.TypeString, value)
 	}
 	if _u.mutation.MessagesCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -419,6 +487,62 @@ func (_u *ThreadUpdateOne) SetNillableLastSyncedAt(v *time.Time) *ThreadUpdateOn
 	return _u
 }
 
+// SetCustomTitle sets the "custom_title" field.
+func (_u *ThreadUpdateOne) SetCustomTitle(v string) *ThreadUpdateOne {
+	_u.mutation.SetCustomTitle(v)
+	return _u
+}
+
+// SetNillableCustomTitle sets the "custom_title" field if the given value is not nil.
+func (_u *ThreadUpdateOne) SetNillableCustomTitle(v *string) *ThreadUpdateOne {
+	if v != nil {
+		_u.SetCustomTitle(*v)
+	}
+	return _u
+}
+
+// SetArchived sets the "archived" field.
+func (_u *ThreadUpdateOne) SetArchived(v bool) *ThreadUpdateOne {
+	_u.mutation.SetArchived(v)
+	return _u
+}
+
+// SetNillableArchived sets the "archived" field if the given value is not nil.
+func (_u *ThreadUpdateOne) SetNillableArchived(v *bool) *ThreadUpdateOne {
+	if v != nil {
+		_u.SetArchived(*v)
+	}
+	return _u
+}
+
+// SetDeleted sets the "deleted" field.
+func (_u *ThreadUpdateOne) SetDeleted(v bool) *ThreadUpdateOne {
+	_u.mutation.SetDeleted(v)
+	return _u
+}
+
+// SetNillableDeleted sets the "deleted" field if the given value is not nil.
+func (_u *ThreadUpdateOne) SetNillableDeleted(v *bool) *ThreadUpdateOne {
+	if v != nil {
+		_u.SetDeleted(*v)
+	}
+	return _u
+}
+
+// SetDeletedHash sets the "deleted_hash" field.
+func (_u *ThreadUpdateOne) SetDeletedHash(v string) *ThreadUpdateOne {
+	_u.mutation.SetDeletedHash(v)
+	return _u
+}
+
+// SetNillableDeletedHash sets the "deleted_hash" field if the given value is not nil.
+func (_u *ThreadUpdateOne) SetNillableDeletedHash(v *string) *ThreadUpdateOne {
+	if v != nil {
+		_u.SetDeletedHash(*v)
+	}
+	return _u
+}
+
 // AddMessageIDs adds the "messages" edge to the Message entity by IDs.
 func (_u *ThreadUpdateOne) AddMessageIDs(ids ...string) *ThreadUpdateOne {
 	_u.mutation.AddMessageIDs(ids...)
@@ -549,6 +673,18 @@ func (_u *ThreadUpdateOne) sqlSave(ctx context.Context) (_node *Thread, err erro
 	}
 	if value, ok := _u.mutation.LastSyncedAt(); ok {
 		_spec.SetField(thread.FieldLastSyncedAt, field.TypeTime, value)
+	}
+	if value, ok := _u.mutation.CustomTitle(); ok {
+		_spec.SetField(thread.FieldCustomTitle, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Archived(); ok {
+		_spec.SetField(thread.FieldArchived, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.Deleted(); ok {
+		_spec.SetField(thread.FieldDeleted, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.DeletedHash(); ok {
+		_spec.SetField(thread.FieldDeletedHash, field.TypeString, value)
 	}
 	if _u.mutation.MessagesCleared() {
 		edge := &sqlgraph.EdgeSpec{

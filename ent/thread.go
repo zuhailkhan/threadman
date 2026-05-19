@@ -33,6 +33,14 @@ type Thread struct {
 	CreatedAt time.Time `json:"created_at,omitempty"`
 	// LastSyncedAt holds the value of the "last_synced_at" field.
 	LastSyncedAt time.Time `json:"last_synced_at,omitempty"`
+	// CustomTitle holds the value of the "custom_title" field.
+	CustomTitle string `json:"custom_title,omitempty"`
+	// Archived holds the value of the "archived" field.
+	Archived bool `json:"archived,omitempty"`
+	// Deleted holds the value of the "deleted" field.
+	Deleted bool `json:"deleted,omitempty"`
+	// DeletedHash holds the value of the "deleted_hash" field.
+	DeletedHash string `json:"deleted_hash,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the ThreadQuery when eager-loading is set.
 	Edges        ThreadEdges `json:"edges"`
@@ -62,7 +70,9 @@ func (*Thread) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case thread.FieldID, thread.FieldProvider, thread.FieldOriginalID, thread.FieldTitle, thread.FieldWorkspacePath, thread.FieldSourceFilePath, thread.FieldCanonicalID:
+		case thread.FieldArchived, thread.FieldDeleted:
+			values[i] = new(sql.NullBool)
+		case thread.FieldID, thread.FieldProvider, thread.FieldOriginalID, thread.FieldTitle, thread.FieldWorkspacePath, thread.FieldSourceFilePath, thread.FieldCanonicalID, thread.FieldCustomTitle, thread.FieldDeletedHash:
 			values[i] = new(sql.NullString)
 		case thread.FieldCreatedAt, thread.FieldLastSyncedAt:
 			values[i] = new(sql.NullTime)
@@ -135,6 +145,30 @@ func (_m *Thread) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.LastSyncedAt = value.Time
 			}
+		case thread.FieldCustomTitle:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field custom_title", values[i])
+			} else if value.Valid {
+				_m.CustomTitle = value.String
+			}
+		case thread.FieldArchived:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field archived", values[i])
+			} else if value.Valid {
+				_m.Archived = value.Bool
+			}
+		case thread.FieldDeleted:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field deleted", values[i])
+			} else if value.Valid {
+				_m.Deleted = value.Bool
+			}
+		case thread.FieldDeletedHash:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field deleted_hash", values[i])
+			} else if value.Valid {
+				_m.DeletedHash = value.String
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -199,6 +233,18 @@ func (_m *Thread) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("last_synced_at=")
 	builder.WriteString(_m.LastSyncedAt.Format(time.ANSIC))
+	builder.WriteString(", ")
+	builder.WriteString("custom_title=")
+	builder.WriteString(_m.CustomTitle)
+	builder.WriteString(", ")
+	builder.WriteString("archived=")
+	builder.WriteString(fmt.Sprintf("%v", _m.Archived))
+	builder.WriteString(", ")
+	builder.WriteString("deleted=")
+	builder.WriteString(fmt.Sprintf("%v", _m.Deleted))
+	builder.WriteString(", ")
+	builder.WriteString("deleted_hash=")
+	builder.WriteString(_m.DeletedHash)
 	builder.WriteByte(')')
 	return builder.String()
 }

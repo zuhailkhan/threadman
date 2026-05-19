@@ -17,4 +17,20 @@ func init() {
 	threadDescCanonicalID := threadFields[6].Descriptor()
 	// thread.DefaultCanonicalID holds the default value on creation for the canonical_id field.
 	thread.DefaultCanonicalID = threadDescCanonicalID.Default.(string)
+	// threadDescCustomTitle is the schema descriptor for custom_title field.
+	threadDescCustomTitle := threadFields[9].Descriptor()
+	// thread.DefaultCustomTitle holds the default value on creation for the custom_title field.
+	thread.DefaultCustomTitle = threadDescCustomTitle.Default.(string)
+	// threadDescArchived is the schema descriptor for archived field.
+	threadDescArchived := threadFields[10].Descriptor()
+	// thread.DefaultArchived holds the default value on creation for the archived field.
+	thread.DefaultArchived = threadDescArchived.Default.(bool)
+	// threadDescDeleted is the schema descriptor for deleted field.
+	threadDescDeleted := threadFields[11].Descriptor()
+	// thread.DefaultDeleted holds the default value on creation for the deleted field.
+	thread.DefaultDeleted = threadDescDeleted.Default.(bool)
+	// threadDescDeletedHash is the schema descriptor for deleted_hash field.
+	threadDescDeletedHash := threadFields[12].Descriptor()
+	// thread.DefaultDeletedHash holds the default value on creation for the deleted_hash field.
+	thread.DefaultDeletedHash = threadDescDeletedHash.Default.(string)
 }

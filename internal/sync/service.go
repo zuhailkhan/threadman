@@ -9,7 +9,6 @@ import (
 	"github.com/zuhailkhan/threadman/internal/ports"
 )
 
-
 type SyncResult struct {
 	Provider     string
 	ThreadsFound int
@@ -95,12 +94,12 @@ func hasUserMessage(messages []domain.Message) bool {
 	return false
 }
 
-func (s *Service) ListThreads(ctx context.Context, provider string) ([]domain.Thread, error) {
-	return s.repo.ListThreads(ctx, provider)
+func (s *Service) ListThreads(ctx context.Context, provider string, includeArchived bool) ([]domain.Thread, error) {
+	return s.repo.ListThreads(ctx, provider, includeArchived)
 }
 
 func (s *Service) GetThread(ctx context.Context, id string) (domain.Thread, error) {
-	threads, err := s.repo.ListThreads(ctx, "")
+	threads, err := s.repo.ListThreads(ctx, "", true)
 	if err != nil {
 		return domain.Thread{}, err
 	}
@@ -157,4 +156,59 @@ func (s *Service) IngestFromHook(ctx context.Context, providerName string, paylo
 		return s.repo.UpsertThread(ctx, thread)
 	}
 	return fmt.Errorf("provider not found: %s", providerName)
+}
+
+func (s *Service) ArchiveThread(ctx context.Context, t domain.Thread) error {
+	key := t.CanonicalID
+	if key == "" {
+		key = t.ID
+	}
+	return s.repo.ArchiveThreadGroup(ctx, key)
+}
+
+func (s *Service) UnarchiveThread(ctx context.Context, t domain.Thread) error {
+	key := t.CanonicalID
+	if key == "" {
+		key = t.ID
+	}
+	return s.repo.UnarchiveThreadGroup(ctx, key)
+}
+
+func (s *Service) RenameThread(ctx context.Context, t domain.Thread, customTitle string) error {
+	key := t.CanonicalID
+	if key == "" {
+		key = t.ID
+	}
+	return s.repo.RenameThreadGroup(ctx, key, customTitle)
+}
+
+func (s *Service) DeleteThreadCopies(ctx context.Context, selected []domain.Thread, writers []ports.ThreadWriter) error {
+	writerByName := make(map[string]ports.ThreadWriter, len(writers))
+	for _, w := range writers {
+		writerByName[w.Name()] = w
+	}
+
+	for _, t := range selected {
+		w, ok := writerByName[t.Provider]
+		if !ok {
+			return fmt.Errorf("no writer for provider: %s", t.Provider)
+		}
+		if err := w.DeleteThread(ctx, t); err != nil {
+			return fmt.Errorf("delete source for %s/%s: %w", t.Provider, t.OriginalID, err)
+		}
+
+		hash := computeDeleteHash(t)
+		if err := s.repo.MarkThreadDeleted(ctx, t.ID, hash); err != nil {
+			return fmt.Errorf("mark deleted %s: %w", t.ID, err)
+		}
+	}
+	return nil
+}
+
+func computeDeleteHash(t domain.Thread) string {
+	if len(t.Messages) == 0 {
+		return "0:0"
+	}
+	last := t.Messages[len(t.Messages)-1]
+	return fmt.Sprintf("%d:%d", len(t.Messages), last.Timestamp.Unix())
 }

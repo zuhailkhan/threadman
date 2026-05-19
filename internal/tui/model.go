@@ -28,6 +28,10 @@ const (
 	stateHandoffPicker
 	stateHandoffConfirm
 	stateResumePicker
+	stateRename
+	stateDeletePicker
+	stateDeleteConfirm
+	stateDeleteTyping
 )
 
 type onboardingProvider struct {
@@ -50,6 +54,7 @@ type handoffWrittenMsg struct {
 }
 type handoffErrMsg struct{ err error }
 type handoffLinkErrMsg struct{ err error }
+type managementDoneMsg struct{}
 
 type Model struct {
 	svc                 *syncsvc.Service
@@ -74,6 +79,11 @@ type Model struct {
 	handoffTarget       ports.ThreadWriter
 	handoffSessionID    string
 	resumeCursor        int
+	showArchived        bool
+	renameDraft         string
+	deleteTargets  []domain.Thread
+	deleteSelected []bool
+	deleteDraft    string
 }
 
 type ThreadGroup struct {
@@ -208,8 +218,9 @@ func (m Model) checkFirstRun() tea.Cmd {
 }
 
 func (m Model) loadThreads() tea.Cmd {
+	showArchived := m.showArchived
 	return func() tea.Msg {
-		threads, err := m.svc.ListThreads(context.Background(), "")
+		threads, err := m.svc.ListThreads(context.Background(), "", showArchived)
 		if err != nil {
 			return errMsg{err}
 		}
@@ -218,8 +229,9 @@ func (m Model) loadThreads() tea.Cmd {
 }
 
 func (m Model) backgroundLoadThreads() tea.Cmd {
+	showArchived := m.showArchived
 	return func() tea.Msg {
-		threads, err := m.svc.ListThreads(context.Background(), "")
+		threads, err := m.svc.ListThreads(context.Background(), "", showArchived)
 		if err != nil {
 			return nil
 		}
@@ -292,6 +304,68 @@ func (m Model) availableHandoffTargets() []ports.ThreadWriter {
 		}
 	}
 	return available
+}
+
+func (m Model) archiveThreadCmd(t domain.Thread) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.svc.ArchiveThread(context.Background(), t); err != nil {
+			return errMsg{err}
+		}
+		return managementDoneMsg{}
+	}
+}
+
+func (m Model) unarchiveThreadCmd(t domain.Thread) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.svc.UnarchiveThread(context.Background(), t); err != nil {
+			return errMsg{err}
+		}
+		return managementDoneMsg{}
+	}
+}
+
+func (m Model) renameThreadCmd(t domain.Thread, title string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.svc.RenameThread(context.Background(), t, title); err != nil {
+			return errMsg{err}
+		}
+		return managementDoneMsg{}
+	}
+}
+
+func (m Model) deleteThreadCopiesCmd(selected []domain.Thread) tea.Cmd {
+	writers := m.writers
+	return func() tea.Msg {
+		if err := m.svc.DeleteThreadCopies(context.Background(), selected, writers); err != nil {
+			return errMsg{err}
+		}
+		return managementDoneMsg{}
+	}
+}
+
+func (m Model) selectedDeleteThreads() []domain.Thread {
+	out := make([]domain.Thread, 0, len(m.deleteTargets))
+	for i, t := range m.deleteTargets {
+		if m.deleteSelected[i] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func (m Model) requiresTypingConfirm(selected []domain.Thread) bool {
+	if len(selected) == len(m.deleteTargets) {
+		return true
+	}
+	for _, t := range selected {
+		if t.CanonicalID != "" && t.ID == t.CanonicalID {
+			return true
+		}
+		if t.CanonicalID == "" && len(m.deleteTargets) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -396,6 +470,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case handoffLinkErrMsg:
 		m.status = "warning: handoff link: " + msg.err.Error()
 
+	case managementDoneMsg:
+		m.state = stateList
+		return m, m.loadThreads()
+
 	case errMsg:
 		m.status = "error: " + msg.err.Error()
 
@@ -498,6 +576,38 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "/":
 			m.state = stateSearch
 			m.query = ""
+		case "a":
+			if len(m.filteredGroups) == 0 {
+				return m, nil
+			}
+			g := m.filteredGroups[m.cursor]
+			if g.Primary.Archived {
+				return m, m.unarchiveThreadCmd(g.Primary)
+			}
+			return m, m.archiveThreadCmd(g.Primary)
+		case "A":
+			m.showArchived = !m.showArchived
+			return m, m.loadThreads()
+		case "n":
+			if len(m.filteredGroups) == 0 {
+				return m, nil
+			}
+			g := m.filteredGroups[m.cursor]
+			m.renameDraft = g.Primary.CustomTitle
+			if m.renameDraft == "" {
+				m.renameDraft = g.Primary.Title
+			}
+			m.state = stateRename
+		case "d":
+			if len(m.filteredGroups) == 0 {
+				return m, nil
+			}
+			g := m.filteredGroups[m.cursor]
+			m.deleteTargets = g.Members
+			m.deleteSelected = make([]bool, len(g.Members))
+			m.deleteDraft = ""
+			m.cursor = 0
+			m.state = stateDeletePicker
 		}
 
 	case stateSearch:
@@ -600,6 +710,109 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateThread
 		}
 
+	case stateDeletePicker:
+		switch msg.String() {
+		case "esc", "q":
+			m.state = stateList
+			m.cursor = 0
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.deleteTargets)-1 {
+				m.cursor++
+			}
+		case " ":
+			if len(m.deleteTargets) > 0 {
+				m.deleteSelected[m.cursor] = !m.deleteSelected[m.cursor]
+			}
+		case "a":
+			for i := range m.deleteSelected {
+				m.deleteSelected[i] = true
+			}
+		case "enter":
+			selected := m.selectedDeleteThreads()
+			if len(selected) == 0 {
+				return m, nil
+			}
+			if m.requiresTypingConfirm(selected) {
+				m.deleteDraft = ""
+				m.state = stateDeleteTyping
+			} else {
+				m.state = stateDeleteConfirm
+			}
+		}
+
+	case stateDeleteConfirm:
+		switch msg.String() {
+		case "y", "Y":
+			selected := m.selectedDeleteThreads()
+			m.deleteTargets = nil
+			m.deleteSelected = nil
+			m.state = stateList
+			m.cursor = 0
+			return m, m.deleteThreadCopiesCmd(selected)
+		case "n", "N", "esc":
+			m.deleteTargets = nil
+			m.deleteSelected = nil
+			m.state = stateList
+			m.cursor = 0
+		}
+
+	case stateDeleteTyping:
+		switch msg.String() {
+		case "esc":
+			m.state = stateList
+			m.deleteDraft = ""
+			m.deleteTargets = nil
+			m.deleteSelected = nil
+			m.cursor = 0
+		case "enter":
+			if strings.ToLower(m.deleteDraft) == "delete thread" {
+				selected := m.selectedDeleteThreads()
+				m.deleteDraft = ""
+				m.deleteTargets = nil
+				m.deleteSelected = nil
+				m.state = stateList
+				m.cursor = 0
+				return m, m.deleteThreadCopiesCmd(selected)
+			}
+		case "backspace":
+			if len(m.deleteDraft) > 0 {
+				m.deleteDraft = m.deleteDraft[:len(m.deleteDraft)-1]
+			}
+		default:
+			if len(msg.Runes) == 1 {
+				m.deleteDraft += string(msg.Runes)
+			}
+		}
+
+	case stateRename:
+		switch msg.String() {
+		case "esc":
+			m.state = stateList
+			m.renameDraft = ""
+		case "enter":
+			if len(m.filteredGroups) == 0 {
+				m.state = stateList
+				return m, nil
+			}
+			g := m.filteredGroups[m.cursor]
+			draft := m.renameDraft
+			m.renameDraft = ""
+			m.state = stateList
+			return m, m.renameThreadCmd(g.Primary, draft)
+		case "backspace":
+			if len(m.renameDraft) > 0 {
+				m.renameDraft = m.renameDraft[:len(m.renameDraft)-1]
+			}
+		default:
+			if len(msg.Runes) == 1 {
+				m.renameDraft += string(msg.Runes)
+			}
+		}
+
 	case stateResumePicker:
 		switch msg.String() {
 		case "esc", "q":
@@ -676,6 +889,14 @@ func (m Model) View() string {
 		return m.viewHandoffConfirm()
 	case stateResumePicker:
 		return m.viewResumePicker()
+	case stateRename:
+		return m.viewRename()
+	case stateDeletePicker:
+		return m.viewDeletePicker()
+	case stateDeleteConfirm:
+		return m.viewDeleteConfirm()
+	case stateDeleteTyping:
+		return m.viewDeleteTyping()
 	default:
 		return m.viewList()
 	}
@@ -833,12 +1054,115 @@ func (m Model) viewHandoffConfirm() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
 }
 
+func (m Model) viewRename() string {
+	dialogWidth := 50
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString("  Rename thread:\n")
+	inner.WriteString("\n")
+	inner.WriteString(fmt.Sprintf("  > %s_\n", m.renameDraft))
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  Enter save    Esc cancel") + "\n")
+	inner.WriteString(styleHint.Render("  (empty string clears custom title)") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewDeletePicker() string {
+	dialogWidth := 44
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString("  Delete copies:\n")
+	inner.WriteString("\n")
+	for i, t := range m.deleteTargets {
+		check := " "
+		if m.deleteSelected[i] {
+			check = "x"
+		}
+		label := providerLabels[t.Provider]
+		if label == "" {
+			label = t.Provider
+		}
+		line := fmt.Sprintf("  [%s] %s", check, label)
+		if i == m.cursor {
+			line = styleCursor.Render("▶") + fmt.Sprintf(" [%s] %s", check, label)
+		}
+		inner.WriteString(line + "\n")
+	}
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  Space toggle  a all  Enter confirm") + "\n")
+	inner.WriteString(styleHint.Render("  Esc cancel") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewDeleteConfirm() string {
+	dialogWidth := 44
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString("  Delete selected copies?\n")
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  y confirm    n / Esc cancel") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewDeleteTyping() string {
+	dialogWidth := 50
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString("  This is the original or last remaining copy.\n")
+	inner.WriteString("  Type \"delete thread\" to confirm:\n")
+	inner.WriteString("\n")
+	inner.WriteString(fmt.Sprintf("  > %s_\n", m.deleteDraft))
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  Enter confirm    Esc cancel") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
 func (m Model) viewList() string {
 	var b strings.Builder
 
 	// header bar
 	title := styleTitle.Render("threadman")
-	hints := styleHint.Render("[s] sync  [H] hooks  [/] search  [q] quit")
+	archivedHint := "[A]show-archived"
+	if m.showArchived {
+		archivedHint = "[A]hide-archived"
+	}
+	hints := styleHint.Render("[s]sync [/]search [d]del [n]ren [a]arch " + archivedHint + " [q]quit")
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(hints)
 	if gap < 1 {
 		gap = 1
@@ -871,6 +1195,8 @@ func (m Model) viewList() string {
 		if i == m.cursor {
 			cursor = styleCursor.Render("▶ ")
 			row = styleSelected.Width(m.width - 2).Render(row)
+		} else if g.Primary.Archived {
+			row = styleArchived.Render(row)
 		}
 		b.WriteString(cursor + row + "\n")
 	}

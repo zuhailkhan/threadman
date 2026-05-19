@@ -550,6 +550,10 @@ type ThreadMutation struct {
 	canonical_id     *string
 	created_at       *time.Time
 	last_synced_at   *time.Time
+	custom_title     *string
+	archived         *bool
+	deleted          *bool
+	deleted_hash     *string
 	clearedFields    map[string]struct{}
 	messages         map[string]struct{}
 	removedmessages  map[string]struct{}
@@ -951,6 +955,150 @@ func (m *ThreadMutation) ResetLastSyncedAt() {
 	m.last_synced_at = nil
 }
 
+// SetCustomTitle sets the "custom_title" field.
+func (m *ThreadMutation) SetCustomTitle(s string) {
+	m.custom_title = &s
+}
+
+// CustomTitle returns the value of the "custom_title" field in the mutation.
+func (m *ThreadMutation) CustomTitle() (r string, exists bool) {
+	v := m.custom_title
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCustomTitle returns the old "custom_title" field's value of the Thread entity.
+// If the Thread object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ThreadMutation) OldCustomTitle(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCustomTitle is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCustomTitle requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCustomTitle: %w", err)
+	}
+	return oldValue.CustomTitle, nil
+}
+
+// ResetCustomTitle resets all changes to the "custom_title" field.
+func (m *ThreadMutation) ResetCustomTitle() {
+	m.custom_title = nil
+}
+
+// SetArchived sets the "archived" field.
+func (m *ThreadMutation) SetArchived(b bool) {
+	m.archived = &b
+}
+
+// Archived returns the value of the "archived" field in the mutation.
+func (m *ThreadMutation) Archived() (r bool, exists bool) {
+	v := m.archived
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldArchived returns the old "archived" field's value of the Thread entity.
+// If the Thread object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ThreadMutation) OldArchived(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldArchived is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldArchived requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldArchived: %w", err)
+	}
+	return oldValue.Archived, nil
+}
+
+// ResetArchived resets all changes to the "archived" field.
+func (m *ThreadMutation) ResetArchived() {
+	m.archived = nil
+}
+
+// SetDeleted sets the "deleted" field.
+func (m *ThreadMutation) SetDeleted(b bool) {
+	m.deleted = &b
+}
+
+// Deleted returns the value of the "deleted" field in the mutation.
+func (m *ThreadMutation) Deleted() (r bool, exists bool) {
+	v := m.deleted
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeleted returns the old "deleted" field's value of the Thread entity.
+// If the Thread object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ThreadMutation) OldDeleted(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeleted is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeleted requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeleted: %w", err)
+	}
+	return oldValue.Deleted, nil
+}
+
+// ResetDeleted resets all changes to the "deleted" field.
+func (m *ThreadMutation) ResetDeleted() {
+	m.deleted = nil
+}
+
+// SetDeletedHash sets the "deleted_hash" field.
+func (m *ThreadMutation) SetDeletedHash(s string) {
+	m.deleted_hash = &s
+}
+
+// DeletedHash returns the value of the "deleted_hash" field in the mutation.
+func (m *ThreadMutation) DeletedHash() (r string, exists bool) {
+	v := m.deleted_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeletedHash returns the old "deleted_hash" field's value of the Thread entity.
+// If the Thread object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ThreadMutation) OldDeletedHash(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeletedHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeletedHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeletedHash: %w", err)
+	}
+	return oldValue.DeletedHash, nil
+}
+
+// ResetDeletedHash resets all changes to the "deleted_hash" field.
+func (m *ThreadMutation) ResetDeletedHash() {
+	m.deleted_hash = nil
+}
+
 // AddMessageIDs adds the "messages" edge to the Message entity by ids.
 func (m *ThreadMutation) AddMessageIDs(ids ...string) {
 	if m.messages == nil {
@@ -1039,7 +1187,7 @@ func (m *ThreadMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ThreadMutation) Fields() []string {
-	fields := make([]string, 0, 8)
+	fields := make([]string, 0, 12)
 	if m.provider != nil {
 		fields = append(fields, thread.FieldProvider)
 	}
@@ -1063,6 +1211,18 @@ func (m *ThreadMutation) Fields() []string {
 	}
 	if m.last_synced_at != nil {
 		fields = append(fields, thread.FieldLastSyncedAt)
+	}
+	if m.custom_title != nil {
+		fields = append(fields, thread.FieldCustomTitle)
+	}
+	if m.archived != nil {
+		fields = append(fields, thread.FieldArchived)
+	}
+	if m.deleted != nil {
+		fields = append(fields, thread.FieldDeleted)
+	}
+	if m.deleted_hash != nil {
+		fields = append(fields, thread.FieldDeletedHash)
 	}
 	return fields
 }
@@ -1088,6 +1248,14 @@ func (m *ThreadMutation) Field(name string) (ent.Value, bool) {
 		return m.CreatedAt()
 	case thread.FieldLastSyncedAt:
 		return m.LastSyncedAt()
+	case thread.FieldCustomTitle:
+		return m.CustomTitle()
+	case thread.FieldArchived:
+		return m.Archived()
+	case thread.FieldDeleted:
+		return m.Deleted()
+	case thread.FieldDeletedHash:
+		return m.DeletedHash()
 	}
 	return nil, false
 }
@@ -1113,6 +1281,14 @@ func (m *ThreadMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldCreatedAt(ctx)
 	case thread.FieldLastSyncedAt:
 		return m.OldLastSyncedAt(ctx)
+	case thread.FieldCustomTitle:
+		return m.OldCustomTitle(ctx)
+	case thread.FieldArchived:
+		return m.OldArchived(ctx)
+	case thread.FieldDeleted:
+		return m.OldDeleted(ctx)
+	case thread.FieldDeletedHash:
+		return m.OldDeletedHash(ctx)
 	}
 	return nil, fmt.Errorf("unknown Thread field %s", name)
 }
@@ -1177,6 +1353,34 @@ func (m *ThreadMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetLastSyncedAt(v)
+		return nil
+	case thread.FieldCustomTitle:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCustomTitle(v)
+		return nil
+	case thread.FieldArchived:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetArchived(v)
+		return nil
+	case thread.FieldDeleted:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeleted(v)
+		return nil
+	case thread.FieldDeletedHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeletedHash(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Thread field %s", name)
@@ -1250,6 +1454,18 @@ func (m *ThreadMutation) ResetField(name string) error {
 		return nil
 	case thread.FieldLastSyncedAt:
 		m.ResetLastSyncedAt()
+		return nil
+	case thread.FieldCustomTitle:
+		m.ResetCustomTitle()
+		return nil
+	case thread.FieldArchived:
+		m.ResetArchived()
+		return nil
+	case thread.FieldDeleted:
+		m.ResetDeleted()
+		return nil
+	case thread.FieldDeletedHash:
+		m.ResetDeletedHash()
 		return nil
 	}
 	return fmt.Errorf("unknown Thread field %s", name)

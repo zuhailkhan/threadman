@@ -105,6 +105,26 @@ func LastSyncedAt(v time.Time) predicate.Thread {
 	return predicate.Thread(sql.FieldEQ(FieldLastSyncedAt, v))
 }
 
+// CustomTitle applies equality check predicate on the "custom_title" field. It's identical to CustomTitleEQ.
+func CustomTitle(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldCustomTitle, v))
+}
+
+// Archived applies equality check predicate on the "archived" field. It's identical to ArchivedEQ.
+func Archived(v bool) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldArchived, v))
+}
+
+// Deleted applies equality check predicate on the "deleted" field. It's identical to DeletedEQ.
+func Deleted(v bool) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldDeleted, v))
+}
+
+// DeletedHash applies equality check predicate on the "deleted_hash" field. It's identical to DeletedHashEQ.
+func DeletedHash(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldDeletedHash, v))
+}
+
 // ProviderEQ applies the EQ predicate on the "provider" field.
 func ProviderEQ(v string) predicate.Thread {
 	return predicate.Thread(sql.FieldEQ(FieldProvider, v))
@@ -573,6 +593,156 @@ func LastSyncedAtLT(v time.Time) predicate.Thread {
 // LastSyncedAtLTE applies the LTE predicate on the "last_synced_at" field.
 func LastSyncedAtLTE(v time.Time) predicate.Thread {
 	return predicate.Thread(sql.FieldLTE(FieldLastSyncedAt, v))
+}
+
+// CustomTitleEQ applies the EQ predicate on the "custom_title" field.
+func CustomTitleEQ(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldCustomTitle, v))
+}
+
+// CustomTitleNEQ applies the NEQ predicate on the "custom_title" field.
+func CustomTitleNEQ(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldNEQ(FieldCustomTitle, v))
+}
+
+// CustomTitleIn applies the In predicate on the "custom_title" field.
+func CustomTitleIn(vs ...string) predicate.Thread {
+	return predicate.Thread(sql.FieldIn(FieldCustomTitle, vs...))
+}
+
+// CustomTitleNotIn applies the NotIn predicate on the "custom_title" field.
+func CustomTitleNotIn(vs ...string) predicate.Thread {
+	return predicate.Thread(sql.FieldNotIn(FieldCustomTitle, vs...))
+}
+
+// CustomTitleGT applies the GT predicate on the "custom_title" field.
+func CustomTitleGT(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldGT(FieldCustomTitle, v))
+}
+
+// CustomTitleGTE applies the GTE predicate on the "custom_title" field.
+func CustomTitleGTE(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldGTE(FieldCustomTitle, v))
+}
+
+// CustomTitleLT applies the LT predicate on the "custom_title" field.
+func CustomTitleLT(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldLT(FieldCustomTitle, v))
+}
+
+// CustomTitleLTE applies the LTE predicate on the "custom_title" field.
+func CustomTitleLTE(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldLTE(FieldCustomTitle, v))
+}
+
+// CustomTitleContains applies the Contains predicate on the "custom_title" field.
+func CustomTitleContains(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldContains(FieldCustomTitle, v))
+}
+
+// CustomTitleHasPrefix applies the HasPrefix predicate on the "custom_title" field.
+func CustomTitleHasPrefix(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldHasPrefix(FieldCustomTitle, v))
+}
+
+// CustomTitleHasSuffix applies the HasSuffix predicate on the "custom_title" field.
+func CustomTitleHasSuffix(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldHasSuffix(FieldCustomTitle, v))
+}
+
+// CustomTitleEqualFold applies the EqualFold predicate on the "custom_title" field.
+func CustomTitleEqualFold(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldEqualFold(FieldCustomTitle, v))
+}
+
+// CustomTitleContainsFold applies the ContainsFold predicate on the "custom_title" field.
+func CustomTitleContainsFold(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldContainsFold(FieldCustomTitle, v))
+}
+
+// ArchivedEQ applies the EQ predicate on the "archived" field.
+func ArchivedEQ(v bool) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldArchived, v))
+}
+
+// ArchivedNEQ applies the NEQ predicate on the "archived" field.
+func ArchivedNEQ(v bool) predicate.Thread {
+	return predicate.Thread(sql.FieldNEQ(FieldArchived, v))
+}
+
+// DeletedEQ applies the EQ predicate on the "deleted" field.
+func DeletedEQ(v bool) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldDeleted, v))
+}
+
+// DeletedNEQ applies the NEQ predicate on the "deleted" field.
+func DeletedNEQ(v bool) predicate.Thread {
+	return predicate.Thread(sql.FieldNEQ(FieldDeleted, v))
+}
+
+// DeletedHashEQ applies the EQ predicate on the "deleted_hash" field.
+func DeletedHashEQ(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldDeletedHash, v))
+}
+
+// DeletedHashNEQ applies the NEQ predicate on the "deleted_hash" field.
+func DeletedHashNEQ(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldNEQ(FieldDeletedHash, v))
+}
+
+// DeletedHashIn applies the In predicate on the "deleted_hash" field.
+func DeletedHashIn(vs ...string) predicate.Thread {
+	return predicate.Thread(sql.FieldIn(FieldDeletedHash, vs...))
+}
+
+// DeletedHashNotIn applies the NotIn predicate on the "deleted_hash" field.
+func DeletedHashNotIn(vs ...string) predicate.Thread {
+	return predicate.Thread(sql.FieldNotIn(FieldDeletedHash, vs...))
+}
+
+// DeletedHashGT applies the GT predicate on the "deleted_hash" field.
+func DeletedHashGT(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldGT(FieldDeletedHash, v))
+}
+
+// DeletedHashGTE applies the GTE predicate on the "deleted_hash" field.
+func DeletedHashGTE(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldGTE(FieldDeletedHash, v))
+}
+
+// DeletedHashLT applies the LT predicate on the "deleted_hash" field.
+func DeletedHashLT(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldLT(FieldDeletedHash, v))
+}
+
+// DeletedHashLTE applies the LTE predicate on the "deleted_hash" field.
+func DeletedHashLTE(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldLTE(FieldDeletedHash, v))
+}
+
+// DeletedHashContains applies the Contains predicate on the "deleted_hash" field.
+func DeletedHashContains(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldContains(FieldDeletedHash, v))
+}
+
+// DeletedHashHasPrefix applies the HasPrefix predicate on the "deleted_hash" field.
+func DeletedHashHasPrefix(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldHasPrefix(FieldDeletedHash, v))
+}
+
+// DeletedHashHasSuffix applies the HasSuffix predicate on the "deleted_hash" field.
+func DeletedHashHasSuffix(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldHasSuffix(FieldDeletedHash, v))
+}
+
+// DeletedHashEqualFold applies the EqualFold predicate on the "deleted_hash" field.
+func DeletedHashEqualFold(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldEqualFold(FieldDeletedHash, v))
+}
+
+// DeletedHashContainsFold applies the ContainsFold predicate on the "deleted_hash" field.
+func DeletedHashContainsFold(v string) predicate.Thread {
+	return predicate.Thread(sql.FieldContainsFold(FieldDeletedHash, v))
 }
 
 // HasMessages applies the HasEdge predicate on the "messages" edge.

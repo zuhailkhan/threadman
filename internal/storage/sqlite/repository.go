@@ -31,7 +31,29 @@ func NewRepository(dbPath string) (*Repository, error) {
 	return &Repository{client: client}, nil
 }
 
+func computeDeleteHash(t domain.Thread) string {
+	if len(t.Messages) == 0 {
+		return "0:0"
+	}
+	last := t.Messages[len(t.Messages)-1]
+	return fmt.Sprintf("%d:%d", len(t.Messages), last.Timestamp.Unix())
+}
+
 func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
+	existing, lookupErr := r.client.Thread.Get(ctx, t.ID)
+	if lookupErr == nil && existing.Deleted {
+		incoming := computeDeleteHash(t)
+		if incoming == existing.DeletedHash {
+			return nil
+		}
+		if err := r.client.Thread.UpdateOneID(t.ID).
+			SetDeleted(false).
+			SetDeletedHash("").
+			Exec(ctx); err != nil {
+			return err
+		}
+	}
+
 	tx, err := r.client.Tx(ctx)
 	if err != nil {
 		return err
@@ -47,6 +69,10 @@ func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
 		SetCanonicalID(t.CanonicalID).
 		SetCreatedAt(t.CreatedAt).
 		SetLastSyncedAt(t.LastSyncedAt).
+		SetCustomTitle("").
+		SetArchived(false).
+		SetDeleted(false).
+		SetDeletedHash("").
 		OnConflict().
 		Update(func(u *ent.ThreadUpsert) {
 			u.SetProvider(t.Provider)
@@ -94,10 +120,15 @@ func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
 	return tx.Commit()
 }
 
-func (r *Repository) ListThreads(ctx context.Context, provider string) ([]domain.Thread, error) {
-	query := r.client.Thread.Query().WithMessages()
+func (r *Repository) ListThreads(ctx context.Context, provider string, includeArchived bool) ([]domain.Thread, error) {
+	query := r.client.Thread.Query().
+		Where(thread.Deleted(false)).
+		WithMessages()
 	if provider != "" {
 		query = query.Where(thread.Provider(provider))
+	}
+	if !includeArchived {
+		query = query.Where(thread.Archived(false))
 	}
 
 	entities, err := query.All(ctx)
@@ -119,7 +150,7 @@ func (r *Repository) CountThreads(ctx context.Context) (int, error) {
 
 func (r *Repository) DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error {
 	_, err := r.client.Thread.Delete().
-		Where(thread.Provider(provider), thread.IDNotIn(ids...)).
+		Where(thread.Provider(provider), thread.IDNotIn(ids...), thread.Deleted(false)).
 		Exec(ctx)
 	return err
 }
@@ -166,6 +197,43 @@ func (r *Repository) RecordHandoff(ctx context.Context, source domain.Thread, ta
 	return r.UpsertThread(ctx, stub)
 }
 
+func (r *Repository) MarkThreadDeleted(ctx context.Context, id, hash string) error {
+	return r.client.Thread.UpdateOneID(id).
+		SetDeleted(true).
+		SetDeletedHash(hash).
+		Exec(ctx)
+}
+
+func (r *Repository) ArchiveThreadGroup(ctx context.Context, canonicalID string) error {
+	return r.client.Thread.Update().
+		Where(thread.Or(
+			thread.CanonicalID(canonicalID),
+			thread.And(thread.ID(canonicalID), thread.CanonicalID("")),
+		)).
+		SetArchived(true).
+		Exec(ctx)
+}
+
+func (r *Repository) UnarchiveThreadGroup(ctx context.Context, canonicalID string) error {
+	return r.client.Thread.Update().
+		Where(thread.Or(
+			thread.CanonicalID(canonicalID),
+			thread.And(thread.ID(canonicalID), thread.CanonicalID("")),
+		)).
+		SetArchived(false).
+		Exec(ctx)
+}
+
+func (r *Repository) RenameThreadGroup(ctx context.Context, canonicalID, customTitle string) error {
+	return r.client.Thread.Update().
+		Where(thread.Or(
+			thread.CanonicalID(canonicalID),
+			thread.And(thread.ID(canonicalID), thread.CanonicalID("")),
+		)).
+		SetCustomTitle(customTitle).
+		Exec(ctx)
+}
+
 func mapEntThreadToDomain(e *ent.Thread) domain.Thread {
 	messages := make([]domain.Message, len(e.Edges.Messages))
 	for j, m := range e.Edges.Messages {
@@ -177,16 +245,23 @@ func mapEntThreadToDomain(e *ent.Thread) domain.Thread {
 		}
 	}
 
+	title := e.Title
+	if e.CustomTitle != "" {
+		title = e.CustomTitle
+	}
+
 	return domain.Thread{
 		ID:             e.ID,
 		Provider:       e.Provider,
 		OriginalID:     e.OriginalID,
-		Title:          e.Title,
+		Title:          title,
+		CustomTitle:    e.CustomTitle,
 		WorkspacePath:  e.WorkspacePath,
 		SourceFilePath: e.SourceFilePath,
 		CanonicalID:    e.CanonicalID,
 		Messages:       messages,
 		CreatedAt:      e.CreatedAt,
 		LastSyncedAt:   e.LastSyncedAt,
+		Archived:       e.Archived,
 	}
 }
