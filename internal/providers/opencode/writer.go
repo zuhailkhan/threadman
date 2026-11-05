@@ -17,6 +17,8 @@ import (
 
 type Writer struct {
 	dbPath string
+	// run overrides how the opencode CLI is invoked. Nil runs the binary on PATH.
+	run func(ctx context.Context, args ...string) ([]byte, error)
 }
 
 func NewWriter() *Writer {
@@ -32,6 +34,13 @@ func NewWriter() *Writer {
 
 func (w *Writer) Name() string {
 	return "opencode"
+}
+
+func (w *Writer) runOpencode(ctx context.Context, args ...string) ([]byte, error) {
+	if w.run != nil {
+		return w.run(ctx, args...)
+	}
+	return exec.CommandContext(ctx, "opencode", args...).CombinedOutput()
 }
 
 func (w *Writer) resolveProjectID(db *sql.DB, workspacePath string) string {
@@ -63,6 +72,14 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 		return "", fmt.Errorf("open db: %w", err)
 	}
 	defer db.Close()
+
+	table, err := sessionTable(ctx, db)
+	if err != nil {
+		return "", err
+	}
+	if table == sessionTableV2 {
+		return w.importThread(ctx, db, thread)
+	}
 
 	projectID := w.resolveProjectID(db, thread.WorkspacePath)
 	version := w.resolveVersion(db)
@@ -122,12 +139,12 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 			})
 		} else {
 			msgData, _ = json.Marshal(map[string]interface{}{
-				"role":  "user",
-				"agent": "build",
-				"model": map[string]string{"providerID": "", "modelID": ""},
-				"tools": map[string]bool{"todowrite": false, "task": false},
+				"role":    "user",
+				"agent":   "build",
+				"model":   map[string]string{"providerID": "", "modelID": ""},
+				"tools":   map[string]bool{"todowrite": false, "task": false},
 				"summary": map[string]interface{}{"diffs": []interface{}{}},
-				"time":  map[string]int64{"created": msgCreated},
+				"time":    map[string]int64{"created": msgCreated},
 			})
 		}
 
@@ -162,6 +179,14 @@ func (w *Writer) DeleteThread(ctx context.Context, thread domain.Thread) error {
 		return fmt.Errorf("open db: %w", err)
 	}
 	defer db.Close()
+
+	table, err := sessionTable(ctx, db)
+	if err != nil {
+		return err
+	}
+	if table == sessionTableV2 {
+		return w.deleteSessionV2(ctx, thread.OriginalID)
+	}
 
 	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
 		return fmt.Errorf("enable foreign keys: %w", err)
