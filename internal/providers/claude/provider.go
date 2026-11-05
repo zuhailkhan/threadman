@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -83,6 +85,9 @@ func (p *Provider) DiscoverThreads(ctx context.Context) ([]domain.Thread, error)
 
 	projectDirs, err := os.ReadDir(p.baseDir)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %s", ports.ErrSourceUnavailable, p.baseDir)
+		}
 		return nil, err
 	}
 

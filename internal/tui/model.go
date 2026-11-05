@@ -81,9 +81,9 @@ type Model struct {
 	resumeCursor        int
 	showArchived        bool
 	renameDraft         string
-	deleteTargets  []domain.Thread
-	deleteSelected []bool
-	deleteDraft    string
+	deleteTargets       []domain.Thread
+	deleteSelected      []bool
+	deleteDraft         string
 }
 
 type ThreadGroup struct {
@@ -393,7 +393,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case syncDoneMsg:
 		var parts []string
 		for _, r := range msg.results {
-			parts = append(parts, fmt.Sprintf("[%s] %d synced", r.Provider, r.ThreadsSaved))
+			switch {
+			case r.Unavailable:
+				parts = append(parts, fmt.Sprintf("[%s] not found", r.Provider))
+			case r.Err != nil:
+				parts = append(parts, fmt.Sprintf("[%s] failed", r.Provider))
+			default:
+				parts = append(parts, fmt.Sprintf("[%s] %d synced", r.Provider, r.ThreadsSaved))
+			}
 		}
 		m.status = strings.Join(parts, "  ")
 		if m.state == stateOnboarding {

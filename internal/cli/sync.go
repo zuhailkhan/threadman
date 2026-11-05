@@ -31,6 +31,10 @@ func newSyncCmd(svc *syncsvc.Service) *cobra.Command {
 
 			hasErr := false
 			for _, r := range results {
+				if r.Unavailable {
+					fmt.Printf("[%-8s] not found, skipped\n", r.Provider)
+					continue
+				}
 				if r.Err != nil {
 					fmt.Fprintf(os.Stderr, "[%s] failed: %v\n", r.Provider, r.Err)
 					hasErr = true

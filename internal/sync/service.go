@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,6 +15,7 @@ type SyncResult struct {
 	ThreadsFound int
 	ThreadsSaved int
 	Skipped      int
+	Unavailable  bool // source not found; nothing was read or pruned
 	Errors       []string
 	Err          error
 }
@@ -35,6 +37,11 @@ func (s *Service) SyncAll(ctx context.Context) []SyncResult {
 
 		threads, err := p.DiscoverThreads(ctx)
 		if err != nil {
+			if errors.Is(err, ports.ErrSourceUnavailable) {
+				result.Unavailable = true
+				results = append(results, result)
+				continue
+			}
 			result.Err = err
 			results = append(results, result)
 			continue

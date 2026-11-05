@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +37,12 @@ func (p *Provider) openDB() (*sql.DB, error) {
 }
 
 func (p *Provider) DiscoverThreads(ctx context.Context) ([]domain.Thread, error) {
+	// sql.Open is lazy and a mode=ro query on a missing file only gives a generic
+	// "unable to open" error, so check for the database explicitly.
+	if _, err := os.Stat(p.dbPath); errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("%w: %s", ports.ErrSourceUnavailable, p.dbPath)
+	}
+
 	db, err := p.openDB()
 	if err != nil {
 		return nil, err
