@@ -88,17 +88,27 @@ func mergeCommandHook(settingsPath, eventName, command string) error {
 		}
 	}
 
-	var hooksMap map[string][]hookMatcher
+	// Existing hooks stay as raw JSON so fields threadman doesn't model, such as
+	// timeout, survive the rewrite.
+	hooksMap := map[string]json.RawMessage{}
 	if hooksRaw, ok := raw["hooks"]; ok {
 		if err := json.Unmarshal(hooksRaw, &hooksMap); err != nil {
 			return fmt.Errorf("parse hooks in %s: %w", settingsPath, err)
 		}
 	}
-	if hooksMap == nil {
-		hooksMap = map[string][]hookMatcher{}
+
+	var matchers []json.RawMessage
+	if eventRaw, ok := hooksMap[eventName]; ok {
+		if err := json.Unmarshal(eventRaw, &matchers); err != nil {
+			return fmt.Errorf("parse %s hooks in %s: %w", eventName, settingsPath, err)
+		}
 	}
 
-	for _, m := range hooksMap[eventName] {
+	for _, rawMatcher := range matchers {
+		var m hookMatcher
+		if err := json.Unmarshal(rawMatcher, &m); err != nil {
+			return fmt.Errorf("parse %s hooks in %s: %w", eventName, settingsPath, err)
+		}
 		for _, h := range m.Hooks {
 			if h.Command == command {
 				return nil
@@ -106,10 +116,18 @@ func mergeCommandHook(settingsPath, eventName, command string) error {
 		}
 	}
 
-	hooksMap[eventName] = append(hooksMap[eventName], hookMatcher{
+	added, err := json.Marshal(hookMatcher{
 		Matcher: "",
 		Hooks:   []hookEntry{{Type: "command", Command: command}},
 	})
+	if err != nil {
+		return err
+	}
+	eventJSON, err := json.Marshal(append(matchers, added))
+	if err != nil {
+		return err
+	}
+	hooksMap[eventName] = eventJSON
 
 	hooksJSON, err := json.Marshal(hooksMap)
 	if err != nil {
