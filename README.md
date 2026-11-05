@@ -20,7 +20,7 @@
 | Provider | Source |
 |----------|--------|
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
-| OpenCode | `~/.local/share/opencode/*/conversation.json` |
+| OpenCode | `~/.local/share/opencode/opencode.db` |
 
 > **Gemini CLI support has been removed.** Google replaced Gemini CLI with Antigravity CLI, so threadman no longer syncs from or hands off to it. Gemini threads already in your local database stay listed and readable.
 
@@ -38,6 +38,12 @@ threadman list
 
 # Search threads
 threadman search <query>
+
+# Print a thread by its number in `threadman list`
+threadman show <number>
+
+# Install per-response ingestion hooks
+threadman setup-hooks
 ```
 
 ### TUI Keybindings
@@ -50,6 +56,11 @@ threadman search <query>
 | q / Esc | Quit or go back |
 | s | Sync all providers |
 | / | Inline search |
+| a | Archive or unarchive selected thread |
+| A | Show or hide archived threads |
+| n | Rename selected thread |
+| d | Delete selected thread |
+| H | Set up ingestion hooks |
 | PgUp / PgDn | Scroll thread |
 | h | Handoff current thread to another provider |
 | r | Resume current thread in its native provider CLI |
@@ -75,6 +86,8 @@ threadman/
 │   ├── providers/        # Claude, OpenCode integrations
 │   ├── storage/sqlite/   # SQLite persistence (ent ORM)
 │   ├── sync/             # Sync service: discover → hydrate → upsert
+│   ├── hooks/            # Provider hook and plugin setup
+│   ├── tui/              # Bubble Tea interface
 │   └── cli/              # Cobra commands + TUI launcher
 └── go.mod
 ```
