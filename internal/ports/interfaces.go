@@ -2,10 +2,16 @@ package ports
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 
 	"github.com/zuhailkhan/threadman/internal/domain"
 )
+
+// ErrSourceUnavailable means a provider has no local source to read, usually
+// because its tool is not installed. Callers must not treat this as "zero
+// threads": pruning on it would erase the provider's stored history.
+var ErrSourceUnavailable = errors.New("provider source not found")
 
 type ThreadProvider interface {
 	Name() string

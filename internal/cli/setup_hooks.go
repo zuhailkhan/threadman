@@ -34,6 +34,6 @@ func newSetupHooksCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&provider, "provider", "", "configure a single provider (claude, gemini, opencode); default configures all")
+	cmd.Flags().StringVar(&provider, "provider", "", "configure a single provider (claude, opencode); default configures all")
 	return cmd
 }

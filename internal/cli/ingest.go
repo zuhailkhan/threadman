@@ -30,6 +30,6 @@ func newIngestCmd(svc *syncsvc.Service) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&provider, "provider", "", "provider name: claude, gemini, or opencode")
+	cmd.Flags().StringVar(&provider, "provider", "", "provider name: claude or opencode")
 	return cmd
 }
