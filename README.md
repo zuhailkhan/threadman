@@ -20,7 +20,7 @@
 | Provider | Source |
 |----------|--------|
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
-| OpenCode | `~/.local/share/opencode/opencode.db` |
+| OpenCode (1.x and 2.x) | `~/.local/share/opencode/opencode.db` |
 
 > **Gemini CLI support has been removed.** Google replaced Gemini CLI with Antigravity CLI, so threadman no longer syncs from or hands off to it. Gemini threads already in your local database stay listed and readable.
 

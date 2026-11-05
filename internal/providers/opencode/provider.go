@@ -49,11 +49,16 @@ func (p *Provider) DiscoverThreads(ctx context.Context) ([]domain.Thread, error)
 	}
 	defer db.Close()
 
-	rows, err := db.QueryContext(ctx, `
-		SELECT id, title, directory, time_created, time_updated
-		FROM session
+	table, err := sessionTable(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT id, COALESCE(title, ''), directory, time_created, time_updated
+		FROM %s
 		WHERE parent_id IS NULL
-	`)
+	`, table))
 	if err != nil {
 		return nil, err
 	}
@@ -96,6 +101,11 @@ func (p *Provider) IngestFromHook(ctx context.Context, payload ports.HookPayload
 	}
 	defer db.Close()
 
+	table, err := sessionTable(ctx, db)
+	if err != nil {
+		return domain.Thread{}, err
+	}
+
 	var (
 		title         string
 		directory     string
@@ -103,7 +113,7 @@ func (p *Provider) IngestFromHook(ctx context.Context, payload ports.HookPayload
 		timeUpdatedMs int64
 	)
 	err = db.QueryRowContext(ctx,
-		`SELECT title, directory, time_created, time_updated FROM session WHERE id = ?`,
+		fmt.Sprintf(`SELECT COALESCE(title, ''), directory, time_created, time_updated FROM %s WHERE id = ?`, table),
 		payload.SessionID,
 	).Scan(&title, &directory, &timeCreatedMs, &timeUpdatedMs)
 	if err != nil {
@@ -129,6 +139,14 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 		return t, err
 	}
 	defer db.Close()
+
+	table, err := sessionTable(ctx, db)
+	if err != nil {
+		return t, err
+	}
+	if table == sessionTableV2 {
+		return p.threadDetailsV2(ctx, db, t)
+	}
 
 	msgRows, err := db.QueryContext(ctx, `
 		SELECT id, json_extract(data, '$.role'), time_created
