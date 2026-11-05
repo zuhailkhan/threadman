@@ -11,8 +11,6 @@ func Setup(provider string) error {
 	switch provider {
 	case "claude":
 		return SetupClaude()
-	case "gemini":
-		return SetupGemini()
 	case "opencode":
 		return SetupOpencode()
 	default:
@@ -22,7 +20,7 @@ func Setup(provider string) error {
 
 func SetupAll() []error {
 	var errs []error
-	for _, fn := range []func() error{SetupClaude, SetupGemini, SetupOpencode} {
+	for _, fn := range []func() error{SetupClaude, SetupOpencode} {
 		if err := fn(); err != nil {
 			errs = append(errs, err)
 		}
@@ -39,18 +37,6 @@ func SetupClaude() error {
 		filepath.Join(home, ".claude", "settings.json"),
 		"Stop",
 		"threadman ingest --provider claude",
-	)
-}
-
-func SetupGemini() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	return mergeCommandHook(
-		filepath.Join(home, ".gemini", "settings.json"),
-		"AfterAgent",
-		"threadman ingest --provider gemini",
 	)
 }
 
