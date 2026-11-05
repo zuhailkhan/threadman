@@ -68,12 +68,20 @@ threadman setup-hooks
 ## Installation
 
 ```bash
+go install github.com/zuhailkhan/threadman/cmd/threadman@latest
+```
+
+This installs `threadman` to your Go bin directory (usually `~/go/bin`), which needs to be on your `PATH`. Run the same command to update.
+
+To build from source instead:
+
+```bash
 git clone https://github.com/zuhailkhan/threadman
 cd threadman
 go build -o threadman ./cmd/threadman
 ```
 
-> Requires a C compiler (`gcc`) — `go-sqlite3` uses CGO.
+> Requires Go 1.26.2 or newer and a C compiler (`gcc`) — `go-sqlite3` uses CGO.
 
 ## Project Structure
 
