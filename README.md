@@ -1,11 +1,11 @@
 # threadman
 
-`threadman` is a terminal interface for managing AI conversation threads across Claude and OpenCode — browse, search, hand off between providers, and sync across devices.
+`threadman` is a terminal interface for managing AI conversation threads across Claude, OpenCode and Pi — browse, search, hand off between providers, and sync across devices.
 
 ## Features
 
 - **Interactive TUI** — full-screen thread browser with colors, navigation, and inline search
-- **Multi-provider sync** — reads local session files from Claude Code and OpenCode
+- **Multi-provider sync** — reads local session files from Claude Code, OpenCode and Pi
 - **Thread reader** — scrollable message view with You/Assistant labels
 - **Handoff** — transfer any conversation to a different provider's native session format and open it immediately
 - **Thread grouping** — threads handed off across providers are grouped into a single row with provider icon clusters `[C O]`
@@ -21,6 +21,7 @@
 |----------|--------|
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | OpenCode (1.x and 2.x) | `~/.local/share/opencode/opencode.db` |
+| Pi | `~/.pi/agent/sessions/**/*.jsonl` (honours `PI_CODING_AGENT_DIR`) |
 
 > **Gemini CLI support has been removed.** Google replaced Gemini CLI with Antigravity CLI, so threadman no longer syncs from or hands off to it. Gemini threads already in your local database stay listed and readable.
 
