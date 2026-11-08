@@ -105,3 +105,7 @@ threadman/
 - **TUI:** charmbracelet/bubbletea + lipgloss + bubbles
 - **CLI:** spf13/cobra
 - **Storage:** SQLite via ent ORM
+
+## License
+
+[MIT](LICENSE)
