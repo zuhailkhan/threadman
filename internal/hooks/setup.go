@@ -13,6 +13,8 @@ func Setup(provider string) error {
 		return SetupClaude()
 	case "opencode":
 		return SetupOpencode()
+	case "pi":
+		return SetupPi()
 	default:
 		return fmt.Errorf("unknown provider: %s", provider)
 	}
@@ -20,7 +22,7 @@ func Setup(provider string) error {
 
 func SetupAll() []error {
 	var errs []error
-	for _, fn := range []func() error{SetupClaude, SetupOpencode} {
+	for _, fn := range []func() error{SetupClaude, SetupOpencode, SetupPi} {
 		if err := fn(); err != nil {
 			errs = append(errs, err)
 		}
@@ -60,6 +62,28 @@ func SetupOpencode() error {
 		filepath.Join(home, ".config", "opencode", "opencode.json"),
 		pluginPath,
 	)
+}
+
+// SetupPi installs a global pi extension. pi auto-discovers extensions in
+// <agent dir>/extensions, so there is no config file to merge into.
+func SetupPi() error {
+	agentDir := os.Getenv("PI_CODING_AGENT_DIR")
+	if agentDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		agentDir = filepath.Join(home, ".pi", "agent")
+	}
+
+	extDir := filepath.Join(agentDir, "extensions")
+	if err := os.MkdirAll(extDir, 0700); err != nil {
+		return fmt.Errorf("create pi extensions dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(extDir, "threadman.ts"), []byte(piExtensionSrc), 0600); err != nil {
+		return fmt.Errorf("write pi extension: %w", err)
+	}
+	return nil
 }
 
 // --- shared JSON hook types ---
@@ -201,5 +225,30 @@ export const ThreadmanPlugin: Plugin = async () => {
       } catch (_) {}
     },
   }
+}
+`
+
+// agent_settled is pi's final "this run is over" event, so the thread is
+// ingested once per response rather than once per retry or tool turn.
+const piExtensionSrc = `import { spawn } from "node:child_process"
+
+export default function (pi: any) {
+  pi.on("agent_settled", async (_event: unknown, ctx: any) => {
+    const file = ctx.sessionManager.getSessionFile()
+    if (!file) return
+    try {
+      const child = spawn("threadman", ["ingest", "--provider", "pi"], {
+        stdio: ["pipe", "ignore", "ignore"],
+        windowsHide: true,
+      })
+      child.on("error", () => {})
+      child.stdin.on("error", () => {})
+      child.stdin.end(JSON.stringify({
+        session_id: ctx.sessionManager.getSessionId(),
+        transcript_path: file,
+        cwd: ctx.cwd,
+      }))
+    } catch (_) {}
+  })
 }
 `

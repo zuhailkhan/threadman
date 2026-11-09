@@ -73,3 +73,22 @@ func readSettings(t *testing.T, path string) map[string]any {
 	}
 	return out
 }
+
+func TestSetupPiWritesExtensionAndIsIdempotent(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+
+	for i := 0; i < 2; i++ {
+		if err := SetupPi(); err != nil {
+			t.Fatalf("SetupPi #%d: %v", i+1, err)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(agentDir, "extensions", "threadman.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != piExtensionSrc {
+		t.Error("extension content differs from the embedded source")
+	}
+}
