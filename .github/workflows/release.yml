@@ -70,6 +70,17 @@ jobs:
           name: ${{ env.NAME }}
           path: dist/${{ env.NAME }}.${{ matrix.ext }}
           if-no-files-found: error
+      # Windows also gets the bare .exe, for people who don't want an archive.
+      - name: Stage bare exe
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: cp "dist/$NAME/threadman.exe" "dist/$NAME.exe"
+      - uses: actions/upload-artifact@v4
+        if: matrix.goos == 'windows'
+        with:
+          name: ${{ env.NAME }}-exe
+          path: dist/${{ env.NAME }}.exe
+          if-no-files-found: error
 
   release:
     name: publish release
