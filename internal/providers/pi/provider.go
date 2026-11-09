@@ -75,27 +75,31 @@ func (p *Provider) DiscoverThreads(ctx context.Context) ([]domain.Thread, error)
 	}
 
 	threads := []domain.Thread{}
+	// pi groups sessions into one folder per workspace, except when the
+	// sessions directory is overridden, where it writes them flat.
+	threads = p.scanDir(p.baseDir, threads)
 	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
-		}
-		dir := filepath.Join(p.baseDir, d.Name())
-		files, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
-				continue
-			}
-			t, err := p.parse(filepath.Join(dir, f.Name()), false)
-			if err != nil {
-				continue
-			}
-			threads = append(threads, t)
+		if d.IsDir() {
+			threads = p.scanDir(filepath.Join(p.baseDir, d.Name()), threads)
 		}
 	}
 	return threads, nil
+}
+
+func (p *Provider) scanDir(dir string, threads []domain.Thread) []domain.Thread {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return threads
+	}
+	for _, f := range files {
+		if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
+			continue
+		}
+		if t, err := p.parse(filepath.Join(dir, f.Name()), false); err == nil {
+			threads = append(threads, t)
+		}
+	}
+	return threads
 }
 
 func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domain.Thread, error) {

@@ -44,6 +44,7 @@ func main() {
 	writers := []ports.ThreadWriter{
 		claude.NewWriter(),
 		opencode.NewWriter(),
+		pi.NewWriter(),
 	}
 
 	if err := cli.Execute(svc, func() {
