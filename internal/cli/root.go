@@ -7,8 +7,9 @@ import (
 
 func Execute(svc *syncsvc.Service, launchTUI func()) error {
 	root := &cobra.Command{
-		Use:   "threadman",
-		Short: "Aggregate AI conversation threads",
+		Use:     "threadman",
+		Short:   "Aggregate AI conversation threads",
+		Version: Version(),
 		Run: func(cmd *cobra.Command, args []string) {
 			launchTUI()
 		},
