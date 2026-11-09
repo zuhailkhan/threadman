@@ -52,7 +52,7 @@ threadman show <number>
 threadman setup-hooks
 ```
 
-`setup-hooks` adds a `Stop` hook to `~/.claude/settings.json` an OpenCode plugin at `~/.config/opencode/plugins/threadman.ts`, and a pi extension at `~/.pi/agent/extensions/threadman.ts`. All three call `threadman ingest`, which reads a hook payload from stdin; you normally don't run it yourself.
+`setup-hooks` adds a `Stop` hook to `~/.claude/settings.json`, an OpenCode plugin at `~/.config/opencode/plugins/threadman.ts`, and a pi extension at `~/.pi/agent/extensions/threadman.ts`. All three call `threadman ingest`, which reads a hook payload from stdin; you normally don't run it yourself.
 
 ### TUI Keybindings
 
