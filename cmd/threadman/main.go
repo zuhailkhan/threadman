@@ -10,6 +10,7 @@ import (
 	"github.com/zuhailkhan/threadman/internal/ports"
 	"github.com/zuhailkhan/threadman/internal/providers/claude"
 	"github.com/zuhailkhan/threadman/internal/providers/opencode"
+	"github.com/zuhailkhan/threadman/internal/providers/pi"
 	"github.com/zuhailkhan/threadman/internal/storage/sqlite"
 	syncsvc "github.com/zuhailkhan/threadman/internal/sync"
 	"github.com/zuhailkhan/threadman/internal/tui"
@@ -37,6 +38,7 @@ func main() {
 	svc := syncsvc.New([]ports.ThreadProvider{
 		claude.NewProvider(),
 		opencode.NewProvider(),
+		pi.NewProvider(),
 	}, repo)
 
 	writers := []ports.ThreadWriter{

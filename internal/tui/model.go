@@ -148,6 +148,7 @@ var providerLabels = map[string]string{
 	"claude":   "Claude Code",
 	"gemini":   "Gemini CLI",
 	"opencode": "OpenCode",
+	"pi":       "pi",
 }
 
 func New(svc *syncsvc.Service, dbPath string, writers []ports.ThreadWriter) Model {

@@ -1,13 +1,13 @@
 # threadman
 
-`threadman` is a terminal interface for managing AI conversation threads across Claude and OpenCode — browse, search, and hand off a conversation from one provider to another.
+`threadman` is a terminal interface for managing AI conversation threads across Claude Code, OpenCode and pi — browse, search, and hand off a conversation from one provider to another.
 
 Everything runs locally: threadman reads the session files your CLIs already write, indexes them into a SQLite database at `~/.local/share/threadman/threads.db`, and makes no network calls.
 
 ## Features
 
 - **Interactive TUI** — full-screen thread browser with colors, navigation, and inline search
-- **Multi-provider import** — reads local session files from Claude Code and OpenCode; first run lets you pick which providers to import
+- **Multi-provider import** — reads local session files from Claude Code, OpenCode and pi; first run lets you pick which providers to import
 - **Live updates** — optional per-response hooks ingest new messages as you chat, and the TUI refreshes automatically
 - **Thread reader** — scrollable message view with You/Assistant labels
 - **Handoff** — transfer any conversation to a different provider's native session format and open it immediately
@@ -24,6 +24,9 @@ Everything runs locally: threadman reads the session files your CLIs already wri
 |----------|--------|
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | OpenCode (1.x and 2.x) | `~/.local/share/opencode/opencode.db` |
+| [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) (read-only) | `~/.pi/agent/sessions/**/*.jsonl` |
+
+pi support is read-only for now: threads are listed, searched and shown, but handoff to or from pi and live hooks are not implemented yet. For branched pi sessions, only the active branch is shown. `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` are respected.
 
 > **Gemini CLI support has been removed.** Google replaced Gemini CLI with Antigravity CLI, so threadman no longer syncs from or hands off to it. Gemini threads already in your local database stay listed and readable.
 
@@ -45,7 +48,7 @@ threadman search <query>
 # Print a thread by its number in `threadman list`
 threadman show <number>
 
-# Install per-response ingestion hooks (--provider to configure just one)
+# Install per-response ingestion hooks for Claude Code and OpenCode (--provider to configure just one)
 threadman setup-hooks
 ```
 
@@ -97,7 +100,7 @@ threadman/
 ├── internal/
 │   ├── domain/           # Core models: Thread, Message, Role
 │   ├── ports/            # Interfaces: ThreadProvider, ThreadRepository
-│   ├── providers/        # Claude, OpenCode integrations
+│   ├── providers/        # Claude, OpenCode, pi integrations
 │   ├── storage/sqlite/   # SQLite persistence (ent ORM)
 │   ├── sync/             # Sync service: discover → hydrate → upsert
 │   ├── hooks/            # Provider hook and plugin setup
