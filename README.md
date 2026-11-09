@@ -76,6 +76,14 @@ threadman setup-hooks
 
 ## Installation
 
+### Download a binary
+
+Prebuilt binaries for Linux (amd64, arm64), macOS (Apple Silicon, Intel) and Windows (amd64) are on the [releases page](https://github.com/zuhailkhan/threadman/releases). Download the archive for your platform, extract it, and put `threadman` somewhere on your `PATH`. Check it with `threadman --version`. Each release has a `checksums.txt` with SHA-256 sums.
+
+The binaries are not code-signed. On macOS, clear the quarantine flag after extracting with `xattr -d com.apple.quarantine threadman`. On Windows, SmartScreen may warn the first time you run it.
+
+### With Go
+
 ```bash
 go install github.com/zuhailkhan/threadman/cmd/threadman@latest
 ```

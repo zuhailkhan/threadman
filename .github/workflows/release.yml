@@ -1,0 +1,97 @@
+name: Release
+
+# Pushing a v* tag builds a binary on each platform and publishes a GitHub
+# release. go-sqlite3 needs CGO, so every binary is built on a matching runner
+# rather than cross-compiled. Pull requests that touch this file run the build
+# jobs only, to check them before a tag is pushed.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest,    goos: linux,   goarch: amd64, ext: tar.gz }
+          - { runner: ubuntu-24.04-arm, goos: linux,   goarch: arm64, ext: tar.gz }
+          - { runner: macos-latest,     goos: darwin,  goarch: arm64, ext: tar.gz }
+          # Cross-built on the arm64 runner: Apple's clang targets x86_64 itself.
+          - { runner: macos-latest,     goos: darwin,  goarch: amd64, ext: tar.gz }
+          - { runner: windows-latest,   goos: windows, goarch: amd64, ext: zip }
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          case "$GITHUB_REF" in refs/tags/v*) ;; *) VERSION="dev" ;; esac
+          NAME="threadman_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          BIN=threadman
+          [ "${{ matrix.goos }}" = windows ] && BIN=threadman.exe
+          mkdir -p "dist/$NAME"
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/zuhailkhan/threadman/internal/cli.version=${VERSION}" \
+            -o "dist/$NAME/$BIN" ./cmd/threadman
+          cp LICENSE README.md "dist/$NAME/"
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+      - name: Smoke test
+        # The darwin/amd64 binary can't run on the arm64 runner without Rosetta.
+        if: ${{ !(matrix.goos == 'darwin' && matrix.goarch == 'amd64') }}
+        shell: bash
+        run: |
+          BIN=threadman
+          [ "${{ matrix.goos }}" = windows ] && BIN=threadman.exe
+          "dist/$NAME/$BIN" --version
+      - name: Package (tar.gz)
+        if: matrix.ext == 'tar.gz'
+        run: tar -C dist -czf "dist/${NAME}.tar.gz" "$NAME"
+      - name: Package (zip)
+        if: matrix.ext == 'zip'
+        shell: pwsh
+        run: Compress-Archive -Path "dist/$env:NAME" -DestinationPath "dist/$env:NAME.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: dist/${{ env.NAME }}.${{ matrix.ext }}
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum threadman_* > checksums.txt
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "threadman $GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
