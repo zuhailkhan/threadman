@@ -102,6 +102,41 @@ func (p *Provider) scanDir(dir string, threads []domain.Thread) []domain.Thread 
 	return threads
 }
 
+// IngestFromHook reads the session file named by the pi extension. pi passes
+// its own path; the session ID is only a fallback for a payload without one.
+func (p *Provider) IngestFromHook(ctx context.Context, payload ports.HookPayload) (domain.Thread, error) {
+	path := payload.TranscriptPath
+	if path == "" {
+		if payload.SessionID == "" {
+			return domain.Thread{}, fmt.Errorf("pi hook payload missing transcript_path and session_id")
+		}
+		var err error
+		if path, err = p.findSessionFile(payload.SessionID); err != nil {
+			return domain.Thread{}, err
+		}
+	}
+	return p.parse(path, true)
+}
+
+func (p *Provider) findSessionFile(sessionID string) (string, error) {
+	dirs := []string{p.baseDir}
+	if entries, err := os.ReadDir(p.baseDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				dirs = append(dirs, filepath.Join(p.baseDir, e.Name()))
+			}
+		}
+	}
+	suffix := "_" + sessionID + ".jsonl"
+	for _, dir := range dirs {
+		matches, _ := filepath.Glob(filepath.Join(dir, "*"+suffix))
+		if len(matches) > 0 {
+			return matches[0], nil
+		}
+	}
+	return "", fmt.Errorf("pi session file not found for session_id: %s", sessionID)
+}
+
 func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domain.Thread, error) {
 	full, err := p.parse(t.SourceFilePath, true)
 	if err != nil {

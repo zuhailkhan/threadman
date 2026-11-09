@@ -92,3 +92,28 @@ func TestNonSessionFileSkipped(t *testing.T) {
 		t.Errorf("got %v, %d threads", err, len(threads))
 	}
 }
+
+func TestIngestFromHook(t *testing.T) {
+	p := writeSession(t,
+		header,
+		`{"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"hi"}}`,
+		`{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}`,
+	)
+	threads, _ := p.DiscoverThreads(context.Background())
+	path := threads[0].SourceFilePath
+
+	byPath, err := p.IngestFromHook(context.Background(), ports.HookPayload{TranscriptPath: path})
+	if err != nil || len(byPath.Messages) != 2 || byPath.OriginalID != "sess-1" {
+		t.Fatalf("by path: %v %+v", err, byPath)
+	}
+
+	// The test file is named ..._abc.jsonl, so look it up by that suffix.
+	byID, err := p.IngestFromHook(context.Background(), ports.HookPayload{SessionID: "abc"})
+	if err != nil || len(byID.Messages) != 2 {
+		t.Fatalf("by id: %v %+v", err, byID)
+	}
+
+	if _, err := p.IngestFromHook(context.Background(), ports.HookPayload{}); err == nil {
+		t.Error("want an error for an empty payload")
+	}
+}

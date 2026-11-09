@@ -26,7 +26,7 @@ Everything runs locally: threadman reads the session files your CLIs already wri
 | OpenCode (1.x and 2.x) | `~/.local/share/opencode/opencode.db` |
 | [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | `~/.pi/agent/sessions/**/*.jsonl` |
 
-Handoff works in both directions with pi: a thread handed to pi is written as a native pi session and opened with `pi --session <id>`. Live hooks are not implemented for pi yet, so run `threadman sync` (or press `s`) to pick up new pi threads. For branched pi sessions, only the active branch is shown. `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` are respected.
+Handoff works in both directions with pi: a thread handed to pi is written as a native pi session and opened with `pi --session <id>`. For branched pi sessions, only the active branch is shown. `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` are respected.
 
 > **Gemini CLI support has been removed.** Google replaced Gemini CLI with Antigravity CLI, so threadman no longer syncs from or hands off to it. Gemini threads already in your local database stay listed and readable.
 
@@ -48,11 +48,11 @@ threadman search <query>
 # Print a thread by its number in `threadman list`
 threadman show <number>
 
-# Install per-response ingestion hooks for Claude Code and OpenCode (--provider to configure just one)
+# Install per-response ingestion hooks for Claude Code, OpenCode and pi (--provider to configure just one)
 threadman setup-hooks
 ```
 
-`setup-hooks` adds a `Stop` hook to `~/.claude/settings.json` and an OpenCode plugin at `~/.config/opencode/plugins/threadman.ts`. Both call `threadman ingest`, which reads a hook payload from stdin; you normally don't run it yourself.
+`setup-hooks` adds a `Stop` hook to `~/.claude/settings.json`, an OpenCode plugin at `~/.config/opencode/plugins/threadman.ts`, and a pi extension at `~/.pi/agent/extensions/threadman.ts`. All three call `threadman ingest`, which reads a hook payload from stdin; you normally don't run it yourself.
 
 ### TUI Keybindings
 
