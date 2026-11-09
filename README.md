@@ -26,7 +26,7 @@ Everything runs locally: threadman reads the session files your CLIs already wri
 | OpenCode (1.x and 2.x) | `~/.local/share/opencode/opencode.db` |
 | [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) (read-only) | `~/.pi/agent/sessions/**/*.jsonl` |
 
-pi support is read-only for now: threads are listed, searched and shown, but handoff to or from pi and live hooks are not implemented yet. For branched pi sessions, only the active branch is shown. `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` are respected.
+pi support is read-only for now: pi threads can be listed, searched, shown and handed off to other providers, but you can't hand a thread off *to* pi, and there is no live hook yet. For branched pi sessions, only the active branch is shown. `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` are respected.
 
 > **Gemini CLI support has been removed.** Google replaced Gemini CLI with Antigravity CLI, so threadman no longer syncs from or hands off to it. Gemini threads already in your local database stay listed and readable.
 
