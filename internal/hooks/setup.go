@@ -210,21 +210,41 @@ func mergeOpencodePlugin(configPath, pluginPath string) error {
 	return os.WriteFile(configPath, out, 0600)
 }
 
-const opencodePluginSrc = `import type { Plugin } from "@opencode-ai/plugin"
-import { execFileSync } from "child_process"
+const opencodePluginSrc = `import { execFileSync } from "child_process"
 
-export const ThreadmanPlugin: Plugin = async () => {
-  return {
-    event: async ({ event }: { event: { type: string; properties: { sessionID: string } } }) => {
-      if (event.type !== "session.idle") return
-      try {
-        execFileSync("threadman", ["ingest", "--provider", "opencode"], {
-          input: JSON.stringify({ session_id: event.properties.sessionID }),
-          stdio: ["pipe", "ignore", "inherit"],
-        })
-      } catch (_) {}
+function ingest(sessionID: string) {
+  try {
+    execFileSync("threadman", ["ingest", "--provider", "opencode"], {
+      input: JSON.stringify({ session_id: sessionID }),
+      stdio: ["pipe", "ignore", "inherit"],
+      windowsHide: true,
+    })
+  } catch (_) {}
+}
+
+// One module that loads on both plugin generations, so it needs no
+// @opencode-ai/plugin dependency whatever opencode version is installed:
+//   v1 (<2.0)  calls server() and delivers events through the event hook
+//   v2 (>=2.0) calls setup() and exposes ctx.event.subscribe()
+export default {
+  id: "threadman",
+  server: async () => ({
+    event: async ({ event }: any) => {
+      if (event?.type === "session.idle") ingest(event.properties.sessionID)
     },
-  }
+  }),
+  async setup(ctx: any) {
+    const controller = new AbortController()
+    void (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({ types: ["session.idle"], signal: controller.signal })) {
+          const id = event?.data?.sessionID ?? event?.properties?.sessionID
+          if (id) ingest(id)
+        }
+      } catch (_) {}
+    })()
+    return () => controller.abort()
+  },
 }
 `
 
