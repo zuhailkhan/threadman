@@ -7,6 +7,7 @@ import (
 
 	"github.com/zuhailkhan/threadman/ent"
 	"github.com/zuhailkhan/threadman/ent/message"
+	"github.com/zuhailkhan/threadman/ent/predicate"
 	"github.com/zuhailkhan/threadman/ent/thread"
 	"github.com/zuhailkhan/threadman/internal/domain"
 
@@ -92,8 +93,18 @@ func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
 		return err
 	}
 
+	messageIDs := make([]string, len(t.Messages))
+	for i, m := range t.Messages {
+		messageIDs[i] = t.ID + ":" + m.ID
+	}
+
+	// Also clear rows by ID: messages orphaned by an earlier prune are no longer
+	// linked to the thread, and would otherwise collide with the insert below.
 	_, err = tx.Message.Delete().
-		Where(message.HasThreadWith(thread.ID(t.ID))).
+		Where(message.Or(
+			message.HasThreadWith(thread.ID(t.ID)),
+			message.IDIn(messageIDs...),
+		)).
 		Exec(ctx)
 	if err != nil {
 		tx.Rollback()
@@ -103,7 +114,7 @@ func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
 	builders := make([]*ent.MessageCreate, len(t.Messages))
 	for i, m := range t.Messages {
 		builders[i] = tx.Message.Create().
-			SetID(t.ID+":"+m.ID).
+			SetID(messageIDs[i]).
 			SetRole(string(m.Role)).
 			SetContent(m.Content).
 			SetTimestamp(m.Timestamp).
@@ -148,11 +159,38 @@ func (r *Repository) CountThreads(ctx context.Context) (int, error) {
 	return r.client.Thread.Query().Count(ctx)
 }
 
+// DeleteThreadsNotIn prunes a provider's threads that are not in ids, together
+// with their messages. An empty ids deletes every thread of the provider, so
+// callers must not pass one unless they mean that.
 func (r *Repository) DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error {
-	_, err := r.client.Thread.Delete().
-		Where(thread.Provider(provider), thread.IDNotIn(ids...), thread.Deleted(false)).
-		Exec(ctx)
-	return err
+	stale := []predicate.Thread{
+		thread.Provider(provider),
+		thread.IDNotIn(ids...),
+		thread.Deleted(false),
+	}
+
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+
+	// The message edge is ON DELETE SET NULL, so deleting only the threads would
+	// leave their messages behind.
+	if _, err := tx.Message.Delete().Where(message.HasThreadWith(stale...)).Exec(ctx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if _, err := tx.Thread.Delete().Where(stale...).Exec(ctx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	// Sweep messages that earlier versions left orphaned.
+	if _, err := tx.Message.Delete().Where(message.Not(message.HasThread())).Exec(ctx); err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *Repository) SearchMessages(ctx context.Context, query string) ([]domain.Thread, error) {
