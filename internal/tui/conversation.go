@@ -46,13 +46,38 @@ func (m Model) handoffTargetsFor() []handoffTarget {
 	entries := conversation.Timeline(m.groupThreads)
 	targets := make([]handoffTarget, 0, len(m.writers))
 	for _, w := range m.writers {
-		t := handoffTarget{writer: w, missed: conversation.Missed(entries, w.Name())}
+		t := handoffTarget{writer: w}
 		if s, ok := conversation.Session(m.groupThreads, w.Name()); ok {
 			t.session = &s
+			t.missed = conversation.Missed(entries, w.Name())
+		} else {
+			// A new session gets the whole conversation, including the
+			// tool's own turns from any session it has since deleted.
+			t.missed = conversation.Everything(entries)
 		}
 		targets = append(targets, t)
 	}
 	return targets
+}
+
+// goneMessage explains why a session can't be resumed.
+func goneMessage(t domain.Thread) string {
+	label := domain.ProviderLabel(t.Provider)
+	return label + " no longer has this session; threadman kept its copy. Hand it off (h) to continue it in a new session."
+}
+
+// goneTools names the tools whose sessions in a conversation were deleted
+// there and survive only in threadman.
+func goneTools(threads []domain.Thread) string {
+	var names []string
+	seen := map[string]bool{}
+	for _, t := range threads {
+		if t.SourceMissing && !seen[t.Provider] {
+			seen[t.Provider] = true
+			names = append(names, domain.ProviderLabel(t.Provider))
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 func firstUsableTarget(targets []handoffTarget) (int, bool) {

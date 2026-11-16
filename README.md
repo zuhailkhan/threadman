@@ -2,7 +2,9 @@
 
 `threadman` is a terminal interface for managing AI conversation threads across Claude Code, OpenCode and pi — browse, search, and hand off a conversation from one provider to another.
 
-Everything runs locally: threadman reads the session files your CLIs already write, indexes them into a SQLite database at `~/.local/share/threadman/threads.db`, and makes no network calls.
+threadman reads the session files your CLIs already write and indexes them into a SQLite database at `~/.local/share/threadman/threads.db`. The only network calls it makes are to the summarization LLM you configure for summary handoffs; with a local model, nothing leaves your machine.
+
+That database is a durable copy. When a tool deletes a session, for example when Claude Code clears out old ones, threadman keeps the conversation: it stays readable and searchable, marked as deleted in that tool, and can be handed off to continue it in a new session.
 
 ## Features
 
@@ -11,7 +13,8 @@ Everything runs locally: threadman reads the session files your CLIs already wri
 - **Live updates** — optional per-response hooks ingest new messages as you chat, and the TUI refreshes automatically
 - **Thread reader** — scrollable message view with You/Assistant labels
 - **Handoff** — transfer any conversation to a different provider's native session format and open it immediately, as the full transcript or as an LLM-written summary
-- **Thread grouping** — threads handed off across providers are grouped into a single row with provider icon clusters `[C O]`
+- **Thread grouping** — threads handed off across providers are grouped into a single row with provider icon clusters `[C O]`; a tool that has deleted its session shows dimmed
+- **Durable history** — conversations survive their tool deleting the session
 - **CLI subcommands** — `sync`, `list`, `search`, `show` for scripting
 
 

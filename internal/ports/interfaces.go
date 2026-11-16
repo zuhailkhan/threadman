@@ -30,7 +30,9 @@ type ThreadRepository interface {
 
 	CountThreads(ctx context.Context) (int, error)
 
-	DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error
+	// MarkMissingNotIn flags the provider's threads not in ids as gone from
+	// their tool, keeping them and their messages.
+	MarkMissingNotIn(ctx context.Context, provider string, ids []string) error
 
 	RecordHandoff(ctx context.Context, source domain.Thread, h domain.Handoff) error
 

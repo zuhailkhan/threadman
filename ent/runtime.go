@@ -55,4 +55,8 @@ func init() {
 	threadDescDeletedHash := threadFields[12].Descriptor()
 	// thread.DefaultDeletedHash holds the default value on creation for the deleted_hash field.
 	thread.DefaultDeletedHash = threadDescDeletedHash.Default.(string)
+	// threadDescSourceMissing is the schema descriptor for source_missing field.
+	threadDescSourceMissing := threadFields[13].Descriptor()
+	// thread.DefaultSourceMissing holds the default value on creation for the source_missing field.
+	thread.DefaultSourceMissing = threadDescSourceMissing.Default.(bool)
 }

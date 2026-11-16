@@ -153,15 +153,24 @@ func buildGroups(threads []domain.Thread) []ThreadGroup {
 func providerIcons(g ThreadGroup) string {
 	seen := map[string]bool{g.Primary.Provider: true}
 	providers := []string{g.Primary.Provider}
-	for _, m := range g.Members {
+	live := map[string]bool{}
+	for _, m := range append([]domain.Thread{g.Primary}, g.Members...) {
 		if !seen[m.Provider] {
 			seen[m.Provider] = true
 			providers = append(providers, m.Provider)
 		}
+		if !m.SourceMissing {
+			live[m.Provider] = true
+		}
 	}
 	parts := make([]string, len(providers))
 	for i, p := range providers {
-		parts[i] = providerStyle(p).Render(providerIcon(p))
+		// A tool that no longer has any of the sessions shows dimmed.
+		style := providerStyle(p)
+		if !live[p] {
+			style = styleArchived
+		}
+		parts[i] = style.Render(providerIcon(p))
 	}
 	return "[" + strings.Join(parts, " ") + "]"
 }
@@ -635,6 +644,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateList
 		case "r":
 			if len(m.groupThreads) <= 1 {
+				if m.thread.SourceMissing {
+					m.status = goneMessage(m.thread)
+					return m, nil
+				}
 				var w ports.ThreadWriter
 				for _, wr := range m.writers {
 					if wr.Name() == m.thread.Provider {
@@ -879,6 +892,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			t := m.groupThreads[m.resumeCursor]
+			if t.SourceMissing {
+				m.status = goneMessage(t)
+				m.state = stateThread
+				return m, nil
+			}
 			var w ports.ThreadWriter
 			for _, wr := range m.writers {
 				if wr.Name() == t.Provider {
@@ -1168,6 +1186,9 @@ func (m Model) viewResumePicker() string {
 		if label == "" {
 			label = t.Provider
 		}
+		if t.SourceMissing {
+			label += styleHint.Render("  deleted")
+		}
 		line := fmt.Sprintf("  %s", label)
 		if i == m.resumeCursor {
 			line = styleCursor.Render("▶") + fmt.Sprintf(" %s", label)
@@ -1408,6 +1429,9 @@ func (m Model) viewThread() string {
 	}
 	hint := styleHint.Render("[r] resume  [h] handoff  [q] back")
 	ws := styleHint.Render(m.thread.WorkspacePath)
+	if gone := goneTools(m.groupThreads); gone != "" {
+		ws += styleHint.Render("  · deleted in " + gone + ", kept by threadman")
+	}
 	left := tag + " " + styleTitle.Render(title) + "  " + ws
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(hint)
 	if gap < 1 {

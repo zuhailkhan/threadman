@@ -51,4 +51,9 @@ type Thread struct {
 	LastSyncedAt time.Time `json:"last_synced_at"`
 
 	Archived bool `json:"archived"`
+
+	// SourceMissing is set when the provider no longer has the session, for
+	// example because the tool cleaned up old sessions. The thread and its
+	// messages are kept, but it can't be resumed or appended to.
+	SourceMissing bool `json:"source_missing,omitempty"`
 }

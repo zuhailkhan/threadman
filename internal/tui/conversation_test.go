@@ -159,3 +159,51 @@ func TestOpenConversationPicksUpNewSession(t *testing.T) {
 		t.Error("a stale reload replaced the conversation")
 	}
 }
+
+// Claude Code deleted its session; threadman kept the copy.
+func TestConversationWithDeletedSession(t *testing.T) {
+	claude, opencode := roundTripGroup()
+	claude.SourceMissing = true
+	claudeWriter := &fakeWriter{name: "claude"}
+	m := Model{
+		state:        stateThread,
+		width:        120,
+		height:       30,
+		thread:       claude,
+		groupThreads: []domain.Thread{claude, opencode},
+		writers:      []ports.ThreadWriter{claudeWriter, &fakeWriter{name: "opencode"}},
+		summarizer:   handoff.NewSummarizer(filepath.Join(t.TempDir(), "config.json")),
+	}
+
+	if v := m.View(); !strings.Contains(v, "deleted in Claude Code, kept by threadman") {
+		t.Errorf("header does not say the session is threadman's copy:\n%s", v)
+	}
+
+	// It can't be resumed.
+	m, _ = press(t, m, "r")
+	m, _ = press(t, m, "enter")
+	if !strings.Contains(m.status, "Claude Code no longer has this session") {
+		t.Errorf("resume status %q", m.status)
+	}
+
+	// Handing back to Claude Code makes a new session with the whole
+	// conversation, Claude's own deleted turns included.
+	m.state = stateThread
+	m, _ = press(t, m, "h")
+	target := m.handoffTargets[0]
+	if target.writer != claudeWriter || target.session != nil || target.status() != "new session" {
+		t.Fatalf("Claude target = %+v (%s)", target, target.status())
+	}
+	m, _ = press(t, m, "enter")
+	m, write := press(t, m, "enter")
+	written := write().(handoffWrittenMsg)
+	if written.appended || len(claudeWriter.written) != 1 {
+		t.Fatalf("want a new session, got appended=%v writes=%d", written.appended, len(claudeWriter.written))
+	}
+	block := claudeWriter.written[0].Messages[0].Content
+	for _, want := range []string{"c1 fix the parser", "o4 now add tests", "4 messages"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("block missing %q:\n%s", want, block)
+		}
+	}
+}

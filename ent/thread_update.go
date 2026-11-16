@@ -197,6 +197,20 @@ func (_u *ThreadUpdate) SetNillableDeletedHash(v *string) *ThreadUpdate {
 	return _u
 }
 
+// SetSourceMissing sets the "source_missing" field.
+func (_u *ThreadUpdate) SetSourceMissing(v bool) *ThreadUpdate {
+	_u.mutation.SetSourceMissing(v)
+	return _u
+}
+
+// SetNillableSourceMissing sets the "source_missing" field if the given value is not nil.
+func (_u *ThreadUpdate) SetNillableSourceMissing(v *bool) *ThreadUpdate {
+	if v != nil {
+		_u.SetSourceMissing(*v)
+	}
+	return _u
+}
+
 // AddMessageIDs adds the "messages" edge to the Message entity by IDs.
 func (_u *ThreadUpdate) AddMessageIDs(ids ...string) *ThreadUpdate {
 	_u.mutation.AddMessageIDs(ids...)
@@ -309,6 +323,9 @@ func (_u *ThreadUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.DeletedHash(); ok {
 		_spec.SetField(thread.FieldDeletedHash, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SourceMissing(); ok {
+		_spec.SetField(thread.FieldSourceMissing, field.TypeBool, value)
 	}
 	if _u.mutation.MessagesCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -543,6 +560,20 @@ func (_u *ThreadUpdateOne) SetNillableDeletedHash(v *string) *ThreadUpdateOne {
 	return _u
 }
 
+// SetSourceMissing sets the "source_missing" field.
+func (_u *ThreadUpdateOne) SetSourceMissing(v bool) *ThreadUpdateOne {
+	_u.mutation.SetSourceMissing(v)
+	return _u
+}
+
+// SetNillableSourceMissing sets the "source_missing" field if the given value is not nil.
+func (_u *ThreadUpdateOne) SetNillableSourceMissing(v *bool) *ThreadUpdateOne {
+	if v != nil {
+		_u.SetSourceMissing(*v)
+	}
+	return _u
+}
+
 // AddMessageIDs adds the "messages" edge to the Message entity by IDs.
 func (_u *ThreadUpdateOne) AddMessageIDs(ids ...string) *ThreadUpdateOne {
 	_u.mutation.AddMessageIDs(ids...)
@@ -685,6 +716,9 @@ func (_u *ThreadUpdateOne) sqlSave(ctx context.Context) (_node *Thread, err erro
 	}
 	if value, ok := _u.mutation.DeletedHash(); ok {
 		_spec.SetField(thread.FieldDeletedHash, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SourceMissing(); ok {
+		_spec.SetField(thread.FieldSourceMissing, field.TypeBool, value)
 	}
 	if _u.mutation.MessagesCleared() {
 		edge := &sqlgraph.EdgeSpec{

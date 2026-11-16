@@ -8,7 +8,6 @@ import (
 
 	"github.com/zuhailkhan/threadman/ent"
 	"github.com/zuhailkhan/threadman/ent/message"
-	"github.com/zuhailkhan/threadman/ent/predicate"
 	"github.com/zuhailkhan/threadman/ent/thread"
 	"github.com/zuhailkhan/threadman/internal/domain"
 
@@ -75,8 +74,11 @@ func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
 		SetArchived(false).
 		SetDeleted(false).
 		SetDeletedHash("").
+		SetSourceMissing(false).
 		OnConflict().
 		Update(func(u *ent.ThreadUpsert) {
+			// The provider produced the session, so it exists again.
+			u.SetSourceMissing(false)
 			u.SetProvider(t.Provider)
 			u.SetOriginalID(t.OriginalID)
 			// An empty title never replaces a known one. Sync blanks the
@@ -167,37 +169,33 @@ func (r *Repository) CountThreads(ctx context.Context) (int, error) {
 	return r.client.Thread.Query().Count(ctx)
 }
 
-// DeleteThreadsNotIn prunes a provider's threads that are not in ids, together
-// with their messages. An empty ids deletes every thread of the provider, so
-// callers must not pass one unless they mean that.
-func (r *Repository) DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error {
-	stale := []predicate.Thread{
-		thread.Provider(provider),
-		thread.IDNotIn(ids...),
-		thread.Deleted(false),
-	}
-
+// MarkMissingNotIn flags a provider's threads that are not in ids as missing
+// from their tool. Nothing is deleted: threadman keeps its copy of a session
+// the tool has removed, and the flag clears if the session is synced again.
+// Threads the user deleted keep their tombstone instead.
+func (r *Repository) MarkMissingNotIn(ctx context.Context, provider string, ids []string) error {
 	tx, err := r.client.Tx(ctx)
 	if err != nil {
 		return err
 	}
-
-	// The message edge is ON DELETE SET NULL, so deleting only the threads would
-	// leave their messages behind.
-	if _, err := tx.Message.Delete().Where(message.HasThreadWith(stale...)).Exec(ctx); err != nil {
+	if err := tx.Thread.Update().
+		Where(
+			thread.Provider(provider),
+			thread.IDNotIn(ids...),
+			thread.Deleted(false),
+			thread.SourceMissing(false),
+		).
+		SetSourceMissing(true).
+		Exec(ctx); err != nil {
 		tx.Rollback()
 		return err
 	}
-	if _, err := tx.Thread.Delete().Where(stale...).Exec(ctx); err != nil {
-		tx.Rollback()
-		return err
-	}
-	// Sweep messages that earlier versions left orphaned.
+	// Earlier versions pruned threads by deleting them, which left their
+	// messages behind unlinked. Nothing can show those any more.
 	if _, err := tx.Message.Delete().Where(message.Not(message.HasThread())).Exec(ctx); err != nil {
 		tx.Rollback()
 		return err
 	}
-
 	return tx.Commit()
 }
 
@@ -373,5 +371,6 @@ func mapEntThreadToDomain(e *ent.Thread) domain.Thread {
 		CreatedAt:      e.CreatedAt,
 		LastSyncedAt:   e.LastSyncedAt,
 		Archived:       e.Archived,
+		SourceMissing:  e.SourceMissing,
 	}
 }

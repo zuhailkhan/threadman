@@ -1464,6 +1464,7 @@ type ThreadMutation struct {
 	archived         *bool
 	deleted          *bool
 	deleted_hash     *string
+	source_missing   *bool
 	clearedFields    map[string]struct{}
 	messages         map[string]struct{}
 	removedmessages  map[string]struct{}
@@ -2009,6 +2010,42 @@ func (m *ThreadMutation) ResetDeletedHash() {
 	m.deleted_hash = nil
 }
 
+// SetSourceMissing sets the "source_missing" field.
+func (m *ThreadMutation) SetSourceMissing(b bool) {
+	m.source_missing = &b
+}
+
+// SourceMissing returns the value of the "source_missing" field in the mutation.
+func (m *ThreadMutation) SourceMissing() (r bool, exists bool) {
+	v := m.source_missing
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSourceMissing returns the old "source_missing" field's value of the Thread entity.
+// If the Thread object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ThreadMutation) OldSourceMissing(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSourceMissing is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSourceMissing requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSourceMissing: %w", err)
+	}
+	return oldValue.SourceMissing, nil
+}
+
+// ResetSourceMissing resets all changes to the "source_missing" field.
+func (m *ThreadMutation) ResetSourceMissing() {
+	m.source_missing = nil
+}
+
 // AddMessageIDs adds the "messages" edge to the Message entity by ids.
 func (m *ThreadMutation) AddMessageIDs(ids ...string) {
 	if m.messages == nil {
@@ -2097,7 +2134,7 @@ func (m *ThreadMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ThreadMutation) Fields() []string {
-	fields := make([]string, 0, 12)
+	fields := make([]string, 0, 13)
 	if m.provider != nil {
 		fields = append(fields, thread.FieldProvider)
 	}
@@ -2134,6 +2171,9 @@ func (m *ThreadMutation) Fields() []string {
 	if m.deleted_hash != nil {
 		fields = append(fields, thread.FieldDeletedHash)
 	}
+	if m.source_missing != nil {
+		fields = append(fields, thread.FieldSourceMissing)
+	}
 	return fields
 }
 
@@ -2166,6 +2206,8 @@ func (m *ThreadMutation) Field(name string) (ent.Value, bool) {
 		return m.Deleted()
 	case thread.FieldDeletedHash:
 		return m.DeletedHash()
+	case thread.FieldSourceMissing:
+		return m.SourceMissing()
 	}
 	return nil, false
 }
@@ -2199,6 +2241,8 @@ func (m *ThreadMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldDeleted(ctx)
 	case thread.FieldDeletedHash:
 		return m.OldDeletedHash(ctx)
+	case thread.FieldSourceMissing:
+		return m.OldSourceMissing(ctx)
 	}
 	return nil, fmt.Errorf("unknown Thread field %s", name)
 }
@@ -2292,6 +2336,13 @@ func (m *ThreadMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetDeletedHash(v)
 		return nil
+	case thread.FieldSourceMissing:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSourceMissing(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Thread field %s", name)
 }
@@ -2376,6 +2427,9 @@ func (m *ThreadMutation) ResetField(name string) error {
 		return nil
 	case thread.FieldDeletedHash:
 		m.ResetDeletedHash()
+		return nil
+	case thread.FieldSourceMissing:
+		m.ResetSourceMissing()
 		return nil
 	}
 	return fmt.Errorf("unknown Thread field %s", name)

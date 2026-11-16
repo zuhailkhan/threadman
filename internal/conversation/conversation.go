@@ -67,8 +67,22 @@ func Missed(entries []Entry, provider string) []Entry {
 	return out
 }
 
+// Everything returns every message on the timeline, leaving out handoff
+// blocks: what a tool starting a new session needs, including its own turns
+// from a session it has since deleted.
+func Everything(entries []Entry) []Entry {
+	var out []Entry
+	for _, e := range entries {
+		if e.Message.Kind != domain.KindHandoff {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // Session returns the session a provider's turns continue in: the one with
-// its newest entry. ok is false when the provider has no session.
+// its newest entry. A session the tool no longer has can't be continued, so
+// it is skipped. ok is false when the provider has no session to continue.
 func Session(threads []domain.Thread, provider string) (domain.Thread, bool) {
 	var (
 		best   domain.Thread
@@ -76,7 +90,7 @@ func Session(threads []domain.Thread, provider string) (domain.Thread, bool) {
 		found  bool
 	)
 	for _, t := range threads {
-		if t.Provider != provider {
+		if t.Provider != provider || t.SourceMissing {
 			continue
 		}
 		at := newest(t)

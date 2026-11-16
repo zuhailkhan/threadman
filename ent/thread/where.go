@@ -125,6 +125,11 @@ func DeletedHash(v string) predicate.Thread {
 	return predicate.Thread(sql.FieldEQ(FieldDeletedHash, v))
 }
 
+// SourceMissing applies equality check predicate on the "source_missing" field. It's identical to SourceMissingEQ.
+func SourceMissing(v bool) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldSourceMissing, v))
+}
+
 // ProviderEQ applies the EQ predicate on the "provider" field.
 func ProviderEQ(v string) predicate.Thread {
 	return predicate.Thread(sql.FieldEQ(FieldProvider, v))
@@ -743,6 +748,16 @@ func DeletedHashEqualFold(v string) predicate.Thread {
 // DeletedHashContainsFold applies the ContainsFold predicate on the "deleted_hash" field.
 func DeletedHashContainsFold(v string) predicate.Thread {
 	return predicate.Thread(sql.FieldContainsFold(FieldDeletedHash, v))
+}
+
+// SourceMissingEQ applies the EQ predicate on the "source_missing" field.
+func SourceMissingEQ(v bool) predicate.Thread {
+	return predicate.Thread(sql.FieldEQ(FieldSourceMissing, v))
+}
+
+// SourceMissingNEQ applies the NEQ predicate on the "source_missing" field.
+func SourceMissingNEQ(v bool) predicate.Thread {
+	return predicate.Thread(sql.FieldNEQ(FieldSourceMissing, v))
 }
 
 // HasMessages applies the HasEdge predicate on the "messages" edge.

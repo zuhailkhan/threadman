@@ -82,12 +82,13 @@ func (s *Service) syncProvider(ctx context.Context, p ports.ThreadProvider) Sync
 		result.ThreadsSaved++
 	}
 
-	// Finding nothing is not evidence that everything was deleted: session
-	// files that can't be read or recognised are skipped without an error, so
-	// pruning on an empty discovery could erase the provider's stored history.
+	// Sessions the tool no longer has are kept and flagged, never deleted.
+	// Finding nothing is not evidence that everything was deleted, though:
+	// session files that can't be read or recognised are skipped without an
+	// error, so an empty discovery would flag every thread for no reason.
 	if len(discoveredIDs) > 0 {
-		if err := s.repo.DeleteThreadsNotIn(ctx, p.Name(), discoveredIDs); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("prune stale threads: %v", err))
+		if err := s.repo.MarkMissingNotIn(ctx, p.Name(), discoveredIDs); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("flag missing sessions: %v", err))
 		}
 	}
 	return result
@@ -125,6 +126,8 @@ func (s *Service) ListThreads(ctx context.Context, provider string, includeArchi
 	return s.repo.ListThreads(ctx, provider, includeArchived)
 }
 
+// GetThread returns a thread read fresh from its tool. When the tool no longer
+// has the session, or can't read it, threadman's stored copy is returned.
 func (s *Service) GetThread(ctx context.Context, id string) (domain.Thread, error) {
 	threads, err := s.repo.ListThreads(ctx, "", true)
 	if err != nil {
@@ -132,11 +135,14 @@ func (s *Service) GetThread(ctx context.Context, id string) (domain.Thread, erro
 	}
 	for _, t := range threads {
 		if t.ID == id {
+			if t.SourceMissing {
+				return t, nil
+			}
 			for _, p := range s.providers {
 				if p.Name() == t.Provider {
 					full, err := p.GetThreadDetails(ctx, t)
 					if err != nil {
-						return full, err
+						return t, nil
 					}
 					markHandoffs(&full)
 					if full.Title == "" {
@@ -229,12 +235,15 @@ func (s *Service) DeleteThreadCopies(ctx context.Context, selected []domain.Thre
 	}
 
 	for _, t := range selected {
-		w, ok := writerByName[t.Provider]
-		if !ok {
-			return fmt.Errorf("no writer for provider: %s", t.Provider)
-		}
-		if err := w.DeleteThread(ctx, t); err != nil {
-			return fmt.Errorf("delete source for %s/%s: %w", t.Provider, t.OriginalID, err)
+		// A session its tool already removed only needs threadman's copy gone.
+		if !t.SourceMissing {
+			w, ok := writerByName[t.Provider]
+			if !ok {
+				return fmt.Errorf("no writer for provider: %s", t.Provider)
+			}
+			if err := w.DeleteThread(ctx, t); err != nil {
+				return fmt.Errorf("delete source for %s/%s: %w", t.Provider, t.OriginalID, err)
+			}
 		}
 
 		hash := computeDeleteHash(t)

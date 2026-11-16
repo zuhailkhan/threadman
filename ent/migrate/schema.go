@@ -66,6 +66,7 @@ var (
 		{Name: "archived", Type: field.TypeBool, Default: false},
 		{Name: "deleted", Type: field.TypeBool, Default: false},
 		{Name: "deleted_hash", Type: field.TypeString, Default: ""},
+		{Name: "source_missing", Type: field.TypeBool, Default: false},
 	}
 	// ThreadsTable holds the schema information for the "threads" table.
 	ThreadsTable = &schema.Table{

@@ -372,7 +372,7 @@ func TestUpsertThread_PreservesArchivedAndCustomTitle(t *testing.T) {
 	}
 }
 
-func TestDeleteThreadsNotIn_PreservesTombstones(t *testing.T) {
+func TestMarkMissingNotIn_LeavesTombstones(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -389,8 +389,11 @@ func TestDeleteThreadsNotIn_PreservesTombstones(t *testing.T) {
 		t.Fatalf("MarkThreadDeleted: %v", err)
 	}
 
-	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{}); err != nil {
-		t.Fatalf("DeleteThreadsNotIn: %v", err)
+	if err := repo.MarkMissingNotIn(ctx, "claude", []string{}); err != nil {
+		t.Fatalf("MarkMissingNotIn: %v", err)
+	}
+	if e, err := repo.client.Thread.Get(ctx, th.ID); err != nil || e.SourceMissing || !e.Deleted {
+		t.Fatalf("tombstone after marking: %+v, %v", e, err)
 	}
 
 	if err := repo.UpsertThread(ctx, th); err != nil {
@@ -423,7 +426,22 @@ func countMessages(t *testing.T, repo *Repository) int {
 	return n
 }
 
-func TestDeleteThreadsNotIn_RemovesMessagesOfPrunedThreads(t *testing.T) {
+func threadsByID(t *testing.T, repo *Repository, provider string) map[string]domain.Thread {
+	t.Helper()
+	threads, err := repo.ListThreads(context.Background(), provider, true)
+	if err != nil {
+		t.Fatalf("ListThreads: %v", err)
+	}
+	out := map[string]domain.Thread{}
+	for _, th := range threads {
+		out[th.ID] = th
+	}
+	return out
+}
+
+// A session its tool removed stays in threadman, with everything the user
+// set on it, flagged as missing.
+func TestMarkMissingNotIn_KeepsThreadAndMessages(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -432,17 +450,46 @@ func TestDeleteThreadsNotIn_RemovesMessagesOfPrunedThreads(t *testing.T) {
 			t.Fatalf("upsert %s: %v", id, err)
 		}
 	}
-
-	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
-		t.Fatalf("DeleteThreadsNotIn: %v", err)
+	if err := repo.RenameThreadGroup(ctx, "claude-gone", "My title"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ArchiveThreadGroup(ctx, "claude-gone"); err != nil {
+		t.Fatal(err)
 	}
 
-	if got := countMessages(t, repo); got != 2 {
-		t.Errorf("messages left: got %d, want the 2 of the kept thread", got)
+	if err := repo.MarkMissingNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
+		t.Fatalf("MarkMissingNotIn: %v", err)
+	}
+
+	got := threadsByID(t, repo, "claude")
+	gone, kept := got["claude-gone"], got["claude-kept"]
+	if !gone.SourceMissing || kept.SourceMissing {
+		t.Errorf("SourceMissing: gone %v, kept %v", gone.SourceMissing, kept.SourceMissing)
+	}
+	if len(gone.Messages) != 2 || gone.CustomTitle != "My title" || !gone.Archived {
+		t.Errorf("missing thread lost data: %+v", gone)
+	}
+	if n := countMessages(t, repo); n != 4 {
+		t.Errorf("messages: got %d, want all 4", n)
 	}
 }
 
-func TestUpsertThread_ReimportsPrunedThread(t *testing.T) {
+func TestMarkMissingNotIn_OnlyThatProvider(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	if err := repo.UpsertThread(ctx, threadWithMessages("pi-1", "pi", "1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkMissingNotIn(ctx, "claude", []string{"claude-x"}); err != nil {
+		t.Fatal(err)
+	}
+	if th := threadsByID(t, repo, "pi")["pi-1"]; th.SourceMissing {
+		t.Error("another provider's thread was flagged")
+	}
+}
+
+// A session that reappears, for example restored from a backup, is live again.
+func TestUpsertThread_ClearsMissingFlag(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -450,32 +497,20 @@ func TestUpsertThread_ReimportsPrunedThread(t *testing.T) {
 	if err := repo.UpsertThread(ctx, gone); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := repo.UpsertThread(ctx, threadWithMessages("claude-kept", "claude", "kept")); err != nil {
-		t.Fatalf("upsert: %v", err)
+	if err := repo.MarkMissingNotIn(ctx, "claude", []string{"claude-other"}); err != nil {
+		t.Fatalf("MarkMissingNotIn: %v", err)
 	}
-	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
-		t.Fatalf("DeleteThreadsNotIn: %v", err)
-	}
-
 	if err := repo.UpsertThread(ctx, gone); err != nil {
-		t.Fatalf("re-upsert of pruned thread: %v", err)
+		t.Fatalf("re-upsert: %v", err)
 	}
-	threads, err := repo.ListThreads(ctx, "claude", false)
-	if err != nil {
-		t.Fatalf("ListThreads: %v", err)
-	}
-	if len(threads) != 2 {
-		t.Fatalf("expected 2 threads, got %d", len(threads))
-	}
-	for _, th := range threads {
-		if len(th.Messages) != 2 {
-			t.Errorf("%s: got %d messages, want 2", th.ID, len(th.Messages))
-		}
+	th := threadsByID(t, repo, "claude")["claude-gone"]
+	if th.SourceMissing || len(th.Messages) != 2 {
+		t.Errorf("after the session came back: missing %v, %d messages", th.SourceMissing, len(th.Messages))
 	}
 }
 
-// Databases written by earlier versions hold messages whose thread was pruned
-// without them. Deleting the thread row directly reproduces that state.
+// Databases written by versions that pruned threads hold messages whose
+// thread was deleted without them. Deleting the thread row directly reproduces that state.
 func orphanMessages(t *testing.T, repo *Repository, th domain.Thread) {
 	t.Helper()
 	ctx := context.Background()
@@ -512,7 +547,7 @@ func TestUpsertThread_ReplacesOrphanedMessages(t *testing.T) {
 	}
 }
 
-func TestDeleteThreadsNotIn_SweepsOrphanedMessages(t *testing.T) {
+func TestMarkMissingNotIn_SweepsOrphanedMessages(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -521,8 +556,8 @@ func TestDeleteThreadsNotIn_SweepsOrphanedMessages(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
-		t.Fatalf("DeleteThreadsNotIn: %v", err)
+	if err := repo.MarkMissingNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
+		t.Fatalf("MarkMissingNotIn: %v", err)
 	}
 
 	if got := countMessages(t, repo); got != 2 {

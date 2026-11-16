@@ -142,3 +142,23 @@ func TestMessagesTagsProvider(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+func TestSessionSkipsSessionsTheToolDeleted(t *testing.T) {
+	gone := domain.Thread{ID: "claude-gone", Provider: "claude", SourceMissing: true, Messages: []domain.Message{msg(9, "newest")}}
+	live := domain.Thread{ID: "claude-live", Provider: "claude", Messages: []domain.Message{msg(1, "older")}}
+
+	if got, ok := Session([]domain.Thread{gone, live}, "claude"); !ok || got.ID != "claude-live" {
+		t.Errorf("Session = %q, %v; want the live session", got.ID, ok)
+	}
+	if _, ok := Session([]domain.Thread{gone}, "claude"); ok {
+		t.Error("a deleted session was offered for continuing")
+	}
+}
+
+func TestEverythingLeavesOutBlocks(t *testing.T) {
+	claude, opencode := handedOff()
+	got := contents(Everything(Timeline([]domain.Thread{claude, opencode})))
+	if want := []string{"c1", "c2", "o5", "o6"}; !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
