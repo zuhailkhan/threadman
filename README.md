@@ -74,6 +74,24 @@ In the summary modes the newest messages are kept word for word after the brief,
 
 Every handoff is recorded in threadman's database with the exact text sent. When the new session is synced, threadman recognises its block: the thread reader shows it as a divider, search skips it, and it doesn't become the session's title.
 
+### One conversation across tools
+
+Sessions linked by handoffs form one conversation. Opening it shows a single timeline: every session's messages in time order, each tagged with its tool, and a divider wherever the conversation was handed off.
+
+The handoff dialog lists every tool with what it would get:
+
+| Status | What happens |
+|--------|--------------|
+| `new session` | The tool has no session in this conversation yet, so one is created holding the whole conversation |
+| `N new messages` | The tool already has a session, so only the messages written elsewhere since its last handoff are appended to it, and you resume that same session |
+| `up to date` | Nothing to send |
+
+So a conversation that goes from Claude Code to OpenCode and back stays one session in each tool: Claude Code's own turns, tool calls included, are untouched, and OpenCode's turns arrive after them as a handoff block. If you kept working in Claude Code after handing off, it still gets everything OpenCode did meanwhile.
+
+OpenCode 2.x has no command for adding to a session, so threadman exports the session, deletes it and imports it again under the same ID with the block added. The export is saved to `~/.local/share/threadman/backups/opencode/` first, and if the import fails or loses messages, the original is imported back. A session with subagent sessions is refused, since deleting it would delete those too.
+
+Close a session in its tool before appending to it: a running session doesn't see the new messages and keeps writing from where it was.
+
 The two summary modes need an LLM. Without one, or when it cannot be reached, only the full transcript is offered.
 
 Press `L` in the thread list or in the mode dialog to set the LLM up in the TUI: choose a provider with ←/→, fill in the model, and optionally a base URL and API key, then press Enter to save and check the connection. The same settings are available from the command line:

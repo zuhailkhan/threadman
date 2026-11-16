@@ -388,6 +388,26 @@ func TestRealOpencodeV2(t *testing.T) {
 		t.Fatalf("messages: got %v, want %v", contents, want)
 	}
 
+	// Appending re-imports the session under the same ID.
+	w.backupDir = filepath.Join(data, "backups")
+	if err := w.AppendMessages(ctx, threads[0], []domain.Message{{Role: domain.RoleUser, Content: "appended", Timestamp: now}}); err != nil {
+		t.Fatalf("AppendMessages: %v", err)
+	}
+	if threads, err = p.DiscoverThreads(ctx); err != nil || len(threads) != 1 || threads[0].OriginalID != sessionID {
+		t.Fatalf("after append: %+v, %v", threads, err)
+	}
+	full, err = p.GetThreadDetails(ctx, threads[0])
+	if err != nil {
+		t.Fatalf("GetThreadDetails after append: %v", err)
+	}
+	contents = contents[:0]
+	for _, m := range full.Messages {
+		contents = append(contents, m.Content)
+	}
+	if want := []string{"first", "second", "third", "appended"}; !slices.Equal(contents, want) {
+		t.Fatalf("messages after append: got %v, want %v", contents, want)
+	}
+
 	if err := w.DeleteThread(ctx, threads[0]); err != nil {
 		t.Fatalf("DeleteThread: %v", err)
 	}

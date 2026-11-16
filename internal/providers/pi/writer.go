@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -80,11 +81,19 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 		return "", err
 	}
 
-	// pi rebuilds the conversation by walking parentId links from the last
-	// entry, so each entry has to point at the one before it.
-	var parentID any
-	used := map[string]bool{}
-	for _, msg := range thread.Messages {
+	if err := writeMessages(enc, thread.Messages, nil, map[string]bool{}, now); err != nil {
+		return "", err
+	}
+	return sessionID, nil
+}
+
+// writeMessages encodes messages as entries chained from parent. pi rebuilds
+// the conversation by walking parentId links from the last entry, so each
+// entry has to point at the one before it. used holds the entry IDs already
+// in the session.
+func writeMessages(enc *json.Encoder, messages []domain.Message, parent any, used map[string]bool, now time.Time) error {
+	parentID := parent
+	for _, msg := range messages {
 		if msg.Role != domain.RoleUser && msg.Role != domain.RoleAssistant {
 			continue
 		}
@@ -96,7 +105,7 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 
 		id, err := entryID(used)
 		if err != nil {
-			return "", err
+			return err
 		}
 
 		m := map[string]any{"role": string(msg.Role), "timestamp": ts.UnixMilli()}
@@ -121,12 +130,62 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 			"timestamp": isoTime(ts),
 			"message":   m,
 		}); err != nil {
-			return "", err
+			return err
 		}
 		parentID = id
 	}
+	return nil
+}
 
-	return sessionID, nil
+// AppendMessages adds messages to the end of an existing session, chained
+// from its last entry, so `pi --session` continues the same session with
+// them on its active branch.
+func (w *Writer) AppendMessages(ctx context.Context, target domain.Thread, messages []domain.Message) error {
+	path := target.SourceFilePath
+	if path == "" {
+		return fmt.Errorf("pi session %s has no session file", target.OriginalID)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read session file: %w", err)
+	}
+
+	// The first line is the session header; its ID names the session and
+	// is not part of the entry tree.
+	used := map[string]bool{}
+	var leaf any
+	for i, line := range bytes.Split(data, []byte("\n")) {
+		var e struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		}
+		if json.Unmarshal(bytes.TrimSpace(line), &e) != nil || e.ID == "" {
+			continue
+		}
+		if i == 0 && e.Type == "session" {
+			continue
+		}
+		used[e.ID] = true
+		leaf = e.ID
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return fmt.Errorf("open session file: %w", err)
+	}
+	defer f.Close()
+
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		if _, err := f.Write([]byte{'\n'}); err != nil {
+			return err
+		}
+	}
+	enc := json.NewEncoder(f)
+	enc.SetEscapeHTML(false)
+	if err := writeMessages(enc, messages, leaf, used, time.Now().UTC()); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func (w *Writer) OpenCommand(sessionID string, workspacePath string) *exec.Cmd {

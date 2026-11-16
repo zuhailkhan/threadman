@@ -1,12 +1,14 @@
 package opencode
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -215,17 +217,26 @@ func newImportDocument(thread domain.Thread, sessionID string, now time.Time) im
 		Messages: make([]importMessage, 0, len(thread.Messages)),
 	}
 
-	for i, msg := range thread.Messages {
+	doc.Messages = toImportMessages(thread.Messages, now, 0)
+	return doc
+}
+
+// toImportMessages converts messages to the import format, each dated after
+// the one before it and after `after`, the newest message already in the
+// session.
+func toImportMessages(messages []domain.Message, now time.Time, after int64) []importMessage {
+	out := make([]importMessage, 0, len(messages))
+	for i, msg := range messages {
 		ts := msg.Timestamp
 		if ts.IsZero() {
 			ts = now
 		}
 		// Offset by index so messages sharing a timestamp stay in order.
-		created := ts.UnixMilli() + int64(i)
+		created := max(ts.UnixMilli(), after+1) + int64(i)
 		id := "msg_" + strings.ReplaceAll(uuid.New().String(), "-", "")
 
 		if msg.Role == domain.RoleAssistant {
-			doc.Messages = append(doc.Messages, importMessage{
+			out = append(out, importMessage{
 				ID:      id,
 				Type:    "assistant",
 				Time:    importMsgTime{Created: created, Completed: created},
@@ -238,7 +249,7 @@ func newImportDocument(thread domain.Thread, sessionID string, now time.Time) im
 			})
 			continue
 		}
-		doc.Messages = append(doc.Messages, importMessage{
+		out = append(out, importMessage{
 			ID:     id,
 			Type:   "user",
 			Time:   importMsgTime{Created: created},
@@ -247,7 +258,7 @@ func newImportDocument(thread domain.Thread, sessionID string, now time.Time) im
 			Agents: []any{},
 		})
 	}
-	return doc
+	return out
 }
 
 // latestModel returns the model and agent of the most recently used session.
@@ -284,25 +295,164 @@ func (w *Writer) importThread(ctx context.Context, db *sql.DB, thread domain.Thr
 		return "", err
 	}
 
-	f, err := os.CreateTemp("", "threadman-opencode-*.json")
-	if err != nil {
-		return "", fmt.Errorf("create import file: %w", err)
-	}
-	defer os.Remove(f.Name())
-
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return "", fmt.Errorf("write import file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return "", fmt.Errorf("write import file: %w", err)
-	}
-
-	out, err := w.runOpencode(ctx, "session", "import", "--directory", thread.WorkspacePath, f.Name())
-	if err != nil {
-		return "", fmt.Errorf("opencode session import: %w: %s", err, firstLine(out))
+	if err := w.importFile(ctx, thread.WorkspacePath, data); err != nil {
+		return "", err
 	}
 	return sessionID, nil
+}
+
+// appendV2 adds messages to an existing 2.x session. OpenCode has no command
+// for that, and import refuses a session ID that already exists, so the
+// session is exported, deleted and imported again under the same ID with the
+// messages added. The export is kept as a backup first; if the import fails or
+// loses messages, the backup is imported back.
+func (w *Writer) appendV2(ctx context.Context, db *sql.DB, target domain.Thread, messages []domain.Message) error {
+	id := target.OriginalID
+
+	// Deleting a session also deletes its subagent sessions, which the
+	// export doesn't contain.
+	var children int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM session_v2 WHERE parent_id = ?`, id).Scan(&children); err != nil {
+		return fmt.Errorf("check subagent sessions: %w", err)
+	}
+	if children > 0 {
+		return fmt.Errorf("opencode session %s has %d subagent session(s); appending to it means re-importing it, which would delete them", id, children)
+	}
+
+	original, err := w.exportSession(ctx, id)
+	if err != nil {
+		return err
+	}
+	backup, err := w.saveBackup(id, original)
+	if err != nil {
+		return err
+	}
+
+	var doc struct {
+		Info     map[string]json.RawMessage `json:"info"`
+		Messages []json.RawMessage          `json:"messages"`
+	}
+	if err := json.Unmarshal(original, &doc); err != nil {
+		return fmt.Errorf("read exported session: %w", err)
+	}
+	before := len(doc.Messages)
+
+	var newest int64
+	for _, raw := range doc.Messages {
+		var m struct {
+			Time importMsgTime `json:"time"`
+		}
+		if json.Unmarshal(raw, &m) == nil && m.Time.Created > newest {
+			newest = m.Time.Created
+		}
+	}
+	for _, m := range toImportMessages(messages, time.Now(), newest) {
+		raw, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		doc.Messages = append(doc.Messages, raw)
+	}
+	updated, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+
+	directory := target.WorkspacePath
+	var loc importLocation
+	if json.Unmarshal(doc.Info["location"], &loc) == nil && loc.Directory != "" {
+		directory = loc.Directory
+	}
+
+	if err := w.deleteSessionV2(ctx, id); err != nil {
+		return err
+	}
+	if err := w.importFile(ctx, directory, updated); err != nil {
+		return w.restore(ctx, id, directory, original, backup, err)
+	}
+
+	got, err := w.exportSession(ctx, id)
+	if err == nil {
+		var check struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		if err = json.Unmarshal(got, &check); err == nil && len(check.Messages) != before+len(messages) {
+			err = fmt.Errorf("re-imported session has %d messages, want %d", len(check.Messages), before+len(messages))
+		}
+	}
+	if err != nil {
+		return w.restore(ctx, id, directory, original, backup, err)
+	}
+	return nil
+}
+
+// restore puts the original session back after a failed append.
+func (w *Writer) restore(ctx context.Context, id, directory string, original []byte, backup string, cause error) error {
+	_ = w.deleteSessionV2(ctx, id)
+	if err := w.importFile(ctx, directory, original); err != nil {
+		return fmt.Errorf("append to opencode session %s failed (%v) and restoring it failed too (%v); the original is saved at %s", id, cause, err, backup)
+	}
+	return fmt.Errorf("append to opencode session %s failed, so it was restored unchanged: %w", id, cause)
+}
+
+// exportSession returns `opencode session export` output: the session as an
+// import document.
+func (w *Writer) exportSession(ctx context.Context, id string) ([]byte, error) {
+	out, err := w.runOpencode(ctx, "session", "export", id)
+	if err != nil {
+		return nil, fmt.Errorf("opencode session export: %w: %s", err, firstLine(out))
+	}
+	// The CLI can print log lines around the JSON; keep the document only.
+	start := bytes.IndexByte(out, '{')
+	if start < 0 {
+		return nil, fmt.Errorf("opencode session export: no session in output: %s", firstLine(out))
+	}
+	var doc json.RawMessage
+	if err := json.NewDecoder(bytes.NewReader(out[start:])).Decode(&doc); err != nil {
+		return nil, fmt.Errorf("opencode session export: %w", err)
+	}
+	return doc, nil
+}
+
+func (w *Writer) saveBackup(id string, data []byte) (string, error) {
+	dir := w.backupDir
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create backup dir: %w", err)
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%s-%d.json", id, time.Now().UnixMilli()))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", fmt.Errorf("back up session: %w", err)
+	}
+	return path, nil
+}
+
+// importFile runs `opencode session import` on a document. Import exits 0
+// when it refuses a session that already exists, so that is checked too.
+func (w *Writer) importFile(ctx context.Context, directory string, data []byte) error {
+	f, err := os.CreateTemp("", "threadman-opencode-*.json")
+	if err != nil {
+		return fmt.Errorf("create import file: %w", err)
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("write import file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("write import file: %w", err)
+	}
+
+	out, err := w.runOpencode(ctx, "session", "import", "--directory", directory, f.Name())
+	if err != nil {
+		return fmt.Errorf("opencode session import: %w: %s", err, firstLine(out))
+	}
+	if strings.Contains(string(out), "already exists") {
+		return fmt.Errorf("opencode session import: %s", firstLine(out))
+	}
+	return nil
 }
 
 func (w *Writer) deleteSessionV2(ctx context.Context, sessionID string) error {

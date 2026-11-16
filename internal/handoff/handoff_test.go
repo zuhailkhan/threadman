@@ -55,10 +55,10 @@ func sampleThread(n int) domain.Thread {
 
 var testNow = time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 
-// build runs Build and checks the invariants every handoff shares: the
+// buildChecked runs Build and checks the invariants every handoff shares: the
 // source is untouched, the output is one handoff block whose content is the
 // record's, and the marker names the record.
-func build(t *testing.T, c *fakeLLM, src domain.Thread, mode Mode) (string, domain.Handoff) {
+func buildChecked(t *testing.T, c *fakeLLM, src domain.Thread, mode Mode) (string, domain.Handoff) {
 	t.Helper()
 	before := append([]domain.Message(nil), src.Messages...)
 
@@ -121,7 +121,7 @@ func TestBuildFullTranscript(t *testing.T) {
 	src := sampleThread(4)
 	src.Messages[3].ID = "m4"
 
-	block, h := build(t, nil, src, ModeFull)
+	block, h := buildChecked(t, nil, src, ModeFull)
 
 	if h.Mode != "full" || h.Summarizer != "" || h.SourceLastMessageID != "m4" {
 		t.Errorf("record = %+v", h)
@@ -148,7 +148,7 @@ func TestBuildDetailedSummary(t *testing.T) {
 	src := sampleThread(10)
 	llm := &fakeLLM{reply: "  ## Goal\nfix tabs  "}
 
-	block, h := build(t, llm, src, ModeDetailed)
+	block, h := buildChecked(t, llm, src, ModeDetailed)
 
 	if h.Mode != "detailed" || h.Summarizer != "Ollama · llama3.2" {
 		t.Errorf("record = %+v", h)
@@ -177,7 +177,7 @@ func TestBuildDetailedSummary(t *testing.T) {
 
 func TestBuildLightSummary(t *testing.T) {
 	llm := &fakeLLM{reply: "short"}
-	block, h := build(t, llm, sampleThread(10), ModeLight)
+	block, h := buildChecked(t, llm, sampleThread(10), ModeLight)
 
 	if llm.system != lightPrompt || h.Mode != "light" {
 		t.Errorf("light mode: prompt match %v, record %+v", llm.system == lightPrompt, h)
@@ -192,7 +192,7 @@ func TestBuildLightSummary(t *testing.T) {
 // plain cut would land on an assistant message.
 func TestBuildTailStartsOnUser(t *testing.T) {
 	src := sampleThread(9) // ends on a user message; last 6 would start on assistant 4
-	block, _ := build(t, &fakeLLM{reply: "s"}, src, ModeDetailed)
+	block, _ := buildChecked(t, &fakeLLM{reply: "s"}, src, ModeDetailed)
 	assertContains(t, block, "first 2 of the conversation's 9 messages", "## Last 7 messages")
 	assertOrder(t, block, "## Last 7 messages", "]\nuser 3")
 }
@@ -201,7 +201,7 @@ func TestBuildTailStartsOnUser(t *testing.T) {
 // recorded as a full transcript.
 func TestBuildShortThreadSkipsLLM(t *testing.T) {
 	llm := &fakeLLM{reply: "unused"}
-	block, h := build(t, llm, sampleThread(6), ModeDetailed)
+	block, h := buildChecked(t, llm, sampleThread(6), ModeDetailed)
 
 	if llm.calls != 0 {
 		t.Error("the LLM was called for a thread with nothing to summarize")
@@ -219,7 +219,7 @@ func TestBuildCarriesEarlierHandoff(t *testing.T) {
 	earlier := domain.HandoffMarker("old-id", "from OpenCode · full transcript · 3 messages") + "\n\nearlier body"
 	src.Messages = append([]domain.Message{{Role: domain.RoleUser, Content: earlier, Kind: domain.KindHandoff, HandoffID: "old-id"}}, src.Messages...)
 
-	block, _ := build(t, nil, src, ModeFull)
+	block, _ := buildChecked(t, nil, src, ModeFull)
 
 	assertContains(t, block, "[Handoff received · from OpenCode · full transcript · 3 messages]\nearlier body")
 	if strings.Contains(block, "old-id") {
@@ -251,4 +251,59 @@ func TestSummarizerWithoutConfig(t *testing.T) {
 	if _, _, err := s.Prepare(context.Background(), src, ModeDetailed); err == nil {
 		t.Error("summary without an LLM should fail")
 	}
+}
+
+// mixedThread is a conversation gathered from two tools: each message names
+// the tool it was written in.
+func mixedThread() domain.Thread {
+	src := sampleThread(4)
+	src.Messages[0].Provider = "claude"
+	src.Messages[1].Provider = "claude"
+	src.Messages[2].Provider = "opencode"
+	src.Messages[3].Provider = "opencode"
+	return src
+}
+
+func TestBuildLabelsEachTurnWithItsTool(t *testing.T) {
+	block, _ := buildChecked(t, nil, mixedThread(), ModeFull)
+
+	assertContains(t, block, "· from Claude Code and OpenCode · full transcript · 4 messages]")
+	assertOrder(t, block,
+		"[User · 2026-11-16 10:01]",
+		"[Assistant · Claude Code · 2026-11-16 10:02]",
+		"[User · 2026-11-16 10:03]",
+		"[Assistant · OpenCode · 2026-11-16 10:04]",
+	)
+}
+
+func TestBuildCatchUp(t *testing.T) {
+	src := sampleThread(2)
+	src.Provider = "opencode"
+
+	out, h, err := BuildCatchUp(context.Background(), nil, "", src, ModeFull, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := out.Messages[0].Content
+	if out.Messages[0].Kind != domain.KindHandoff || h.Mode != "full" {
+		t.Errorf("got %+v, record %+v", out.Messages[0], h)
+	}
+	assertContains(t, block,
+		"· from OpenCode · full transcript · 2 new messages]",
+		"This conversation continued in OpenCode after it was last here",
+		"You wrote none of it",
+	)
+	if strings.Contains(block, "carries over a conversation that took place") {
+		t.Errorf("a catch-up block described itself as a whole conversation:\n%s", block)
+	}
+}
+
+func TestBuildCatchUpSummary(t *testing.T) {
+	llm := &fakeLLM{reply: "brief"}
+	out, _, err := BuildCatchUp(context.Background(), llm, "Ollama · llama3.2", sampleThread(10), ModeDetailed, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertContains(t, out.Messages[0].Content, "· detailed summary · 10 new messages]", "first 4 of the 10 new messages")
+	assertContains(t, llm.user, "already knows this conversation up to the start of the transcript")
 }

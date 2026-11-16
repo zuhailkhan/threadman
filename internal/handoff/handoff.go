@@ -186,8 +186,18 @@ func (s *Summarizer) Check(ctx context.Context) Status {
 // the target provider, holding a single handoff block, and the record of it.
 // The record's target is filled in once the session has been written.
 func (s *Summarizer) Prepare(ctx context.Context, t domain.Thread, mode Mode) (domain.Thread, domain.Handoff, error) {
+	return s.prepare(ctx, t, mode, false)
+}
+
+// PrepareCatchUp is Prepare for a target that already holds the earlier part
+// of the conversation: t holds only the messages it missed.
+func (s *Summarizer) PrepareCatchUp(ctx context.Context, t domain.Thread, mode Mode) (domain.Thread, domain.Handoff, error) {
+	return s.prepare(ctx, t, mode, true)
+}
+
+func (s *Summarizer) prepare(ctx context.Context, t domain.Thread, mode Mode, catchUp bool) (domain.Thread, domain.Handoff, error) {
 	if !mode.NeedsLLM() {
-		return Build(ctx, nil, "", t, mode, time.Now())
+		return build(ctx, nil, "", t, mode, time.Now(), catchUp)
 	}
 	c, cfg, ok, err := s.client()
 	if err != nil {
@@ -196,7 +206,7 @@ func (s *Summarizer) Prepare(ctx context.Context, t domain.Thread, mode Mode) (d
 	if !ok {
 		return domain.Thread{}, domain.Handoff{}, fmt.Errorf("no LLM configured; run 'threadman llm set'")
 	}
-	return Build(ctx, c, cfg.Label(), t, mode, time.Now())
+	return build(ctx, c, cfg.Label(), t, mode, time.Now(), catchUp)
 }
 
 // Build composes the handoff of t. In the summary modes the older messages are
@@ -204,6 +214,17 @@ func (s *Summarizer) Prepare(ctx context.Context, t domain.Thread, mode Mode) (d
 // newest few are kept word for word; c is not used for ModeFull. A thread too
 // short to have older messages is handed over in full, without calling c.
 func Build(ctx context.Context, c llm.Client, summarizer string, t domain.Thread, mode Mode, now time.Time) (domain.Thread, domain.Handoff, error) {
+	return build(ctx, c, summarizer, t, mode, now, false)
+}
+
+// BuildCatchUp is Build for a target that already holds the earlier part of
+// the conversation: t holds only the messages it missed, and the block says
+// so.
+func BuildCatchUp(ctx context.Context, c llm.Client, summarizer string, t domain.Thread, mode Mode, now time.Time) (domain.Thread, domain.Handoff, error) {
+	return build(ctx, c, summarizer, t, mode, now, true)
+}
+
+func build(ctx context.Context, c llm.Client, summarizer string, t domain.Thread, mode Mode, now time.Time, catchUp bool) (domain.Thread, domain.Handoff, error) {
 	split := 0
 	summary := ""
 	if mode.NeedsLLM() {
@@ -218,7 +239,7 @@ func Build(ctx context.Context, c llm.Client, summarizer string, t domain.Thread
 			system = lightPrompt
 		}
 		var err error
-		summary, err = c.Complete(ctx, system, renderTranscript(t, split))
+		summary, err = c.Complete(ctx, system, renderTranscript(t, split, catchUp))
 		if err != nil {
 			return domain.Thread{}, domain.Handoff{}, err
 		}
@@ -237,7 +258,7 @@ func Build(ctx context.Context, c llm.Client, summarizer string, t domain.Thread
 	if n := len(t.Messages); n > 0 {
 		h.SourceLastMessageID = t.Messages[n-1].ID
 	}
-	h.Content = composeBlock(h.ID, t, mode, split, summary, summarizer)
+	h.Content = composeBlock(h.ID, t, mode, split, summary, summarizer, catchUp)
 
 	out := t
 	out.Messages = []domain.Message{{
@@ -254,21 +275,33 @@ func Build(ctx context.Context, c llm.Client, summarizer string, t domain.Thread
 // composeBlock writes the handoff block: a marker line threadman recognises on
 // sync, a note on where the content came from, then the brief and the
 // messages handed over word for word.
-func composeBlock(id string, t domain.Thread, mode Mode, split int, summary, summarizer string) string {
-	source := domain.ProviderLabel(t.Provider)
+func composeBlock(id string, t domain.Thread, mode Mode, split int, summary, summarizer string, catchUp bool) string {
+	source := sourceLabel(t)
 	total := len(t.Messages)
+	noun := "message"
+	if catchUp {
+		noun = "new message"
+	}
 
 	var b strings.Builder
-	b.WriteString(domain.HandoffMarker(id, fmt.Sprintf("from %s · %s · %s", source, strings.ToLower(mode.Label()), plural(total, "message"))))
+	b.WriteString(domain.HandoffMarker(id, fmt.Sprintf("from %s · %s · %s", source, strings.ToLower(mode.Label()), plural(total, noun))))
 	b.WriteString("\n\n")
-	fmt.Fprintf(&b, "threadman wrote this message, not the user. It carries over a conversation that took place in %s so you can continue it here. ", source)
+	if catchUp {
+		fmt.Fprintf(&b, "threadman wrote this message, not the user. This conversation continued in %s after it was last here; this carries over what happened there so you can pick it up. ", source)
+	} else {
+		fmt.Fprintf(&b, "threadman wrote this message, not the user. It carries over a conversation that took place in %s so you can continue it here. ", source)
+	}
 	b.WriteString("You wrote none of it: the assistant turns below came from another model, so treat what they say as an account to check against the code, not as your own earlier statements.\n\n")
 	if mode.NeedsLLM() {
 		model := "a language model"
 		if summarizer != "" {
 			model += " (" + summarizer + ")"
 		}
-		fmt.Fprintf(&b, "The brief covers the first %d of the conversation's %d messages and was written by %s; it can be incomplete or wrong. ", split, total, model)
+		of := "the conversation's"
+		if catchUp {
+			of = "the"
+		}
+		fmt.Fprintf(&b, "The brief covers the first %d of %s %d %ss and was written by %s; it can be incomplete or wrong. ", split, of, total, noun, model)
 		fmt.Fprintf(&b, "The last %s follow it word for word, and where the two disagree, the messages are right.\n\n", plural(total-split, "message"))
 	}
 	if t.ID != "" {
@@ -284,9 +317,34 @@ func composeBlock(id string, t domain.Thread, mode Mode, split int, summary, sum
 		b.WriteString("## Conversation\n\n")
 	}
 	for _, m := range t.Messages[split:] {
-		writeTurn(&b, m, source)
+		writeTurn(&b, m, t.Provider)
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// sourceLabel names the tools the handed-over messages were written in, in
+// the order they first appear.
+func sourceLabel(t domain.Thread) string {
+	var names []string
+	seen := map[string]bool{}
+	for _, m := range t.Messages {
+		p := m.Provider
+		if p == "" {
+			p = t.Provider
+		}
+		if !seen[p] {
+			seen[p] = true
+			names = append(names, domain.ProviderLabel(p))
+		}
+	}
+	switch len(names) {
+	case 0:
+		return domain.ProviderLabel(t.Provider)
+	case 1:
+		return names[0]
+	default:
+		return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	}
 }
 
 func plural(n int, noun string) string {
@@ -296,8 +354,10 @@ func plural(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-// writeTurn writes one message under a label naming who wrote it.
-func writeTurn(b *strings.Builder, m domain.Message, source string) {
+// writeTurn writes one message under a label naming who wrote it. An
+// assistant turn names the tool it was written in: the message's own
+// provider, or the thread's.
+func writeTurn(b *strings.Builder, m domain.Message, threadProvider string) {
 	body := strings.TrimSpace(m.Content)
 	var label string
 	switch {
@@ -317,7 +377,11 @@ func writeTurn(b *strings.Builder, m domain.Message, source string) {
 	case m.Role == domain.RoleUser:
 		label = "User"
 	case m.Role == domain.RoleAssistant:
-		label = "Assistant · " + source
+		p := m.Provider
+		if p == "" {
+			p = threadProvider
+		}
+		label = "Assistant · " + domain.ProviderLabel(p)
 	default:
 		label = string(m.Role)
 	}
@@ -334,7 +398,7 @@ func writeTurn(b *strings.Builder, m domain.Message, source string) {
 // numbering turns so the brief can keep them in order. Only the messages
 // before split are included: the rest are handed over word for word, and a
 // model that can see them tends to repeat them in the brief.
-func renderTranscript(t domain.Thread, split int) string {
+func renderTranscript(t domain.Thread, split int, catchUp bool) string {
 	var b strings.Builder
 	title := t.CustomTitle
 	if title == "" {
@@ -345,6 +409,9 @@ func renderTranscript(t domain.Thread, split int) string {
 	}
 	if t.WorkspacePath != "" {
 		fmt.Fprintf(&b, "Working directory: %s\n", t.WorkspacePath)
+	}
+	if catchUp {
+		b.WriteString("The next assistant already knows this conversation up to the start of the transcript below. The transcript holds only what happened since, in another tool; summarize that, not the conversation as a whole.\n")
 	}
 	b.WriteString("\n<transcript>\n")
 	for i, m := range t.Messages[:split] {

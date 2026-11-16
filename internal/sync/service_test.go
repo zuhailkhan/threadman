@@ -176,3 +176,32 @@ func TestIngestFromHookMarksHandoffBlocks(t *testing.T) {
 	}
 	assertHandoffsMarked(t, repo.saved[0])
 }
+
+type countingProvider struct {
+	stubProvider
+	discovered *int
+}
+
+func (p countingProvider) DiscoverThreads(ctx context.Context) ([]domain.Thread, error) {
+	*p.discovered++
+	return p.stubProvider.DiscoverThreads(ctx)
+}
+
+func TestSyncProviderSyncsOnlyThatProvider(t *testing.T) {
+	var a, b int
+	svc := New([]ports.ThreadProvider{
+		countingProvider{stubProvider{name: "a"}, &a},
+		countingProvider{stubProvider{name: "b"}, &b},
+	}, &pruneRecorder{})
+
+	r, ok := svc.SyncProvider(context.Background(), "b")
+	if !ok || r.Provider != "b" {
+		t.Fatalf("SyncProvider = %+v, %v", r, ok)
+	}
+	if a != 0 || b != 1 {
+		t.Errorf("discovered a %d times and b %d times, want 0 and 1", a, b)
+	}
+	if _, ok := svc.SyncProvider(context.Background(), "missing"); ok {
+		t.Error("an unknown provider was synced")
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,18 +18,22 @@ import (
 
 type Writer struct {
 	dbPath string
+	// backupDir keeps a copy of each OpenCode 2.x session before it is
+	// re-imported to append to it.
+	backupDir string
 	// run overrides how the opencode CLI is invoked. Nil runs the binary on PATH.
 	run func(ctx context.Context, args ...string) ([]byte, error)
 }
 
 func NewWriter() *Writer {
+	home, _ := os.UserHomeDir()
 	dbPath := os.Getenv("OPENCODE_DB_PATH")
 	if dbPath == "" {
-		home, _ := os.UserHomeDir()
 		dbPath = filepath.Join(home, ".local", "share", "opencode", "opencode.db")
 	}
 	return &Writer{
-		dbPath: dbPath,
+		dbPath:    dbPath,
+		backupDir: filepath.Join(home, ".local", "share", "threadman", "backups", "opencode"),
 	}
 }
 
@@ -107,7 +112,22 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 		return "", fmt.Errorf("insert session: %w", err)
 	}
 
-	for i, msg := range thread.Messages {
+	if err := insertMessagesV1(ctx, tx, sessionID, thread.WorkspacePath, thread.Messages, 0); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit: %w", err)
+	}
+
+	return sessionID, nil
+}
+
+// insertMessagesV1 adds messages to a 1.x session, one message row and one
+// text part each. OpenCode orders messages by time_created, so each is dated
+// after the one before it and after `after`, the session's newest message.
+func insertMessagesV1(ctx context.Context, tx *sql.Tx, sessionID, workspace string, messages []domain.Message, after int64) error {
+	for i, msg := range messages {
 		msgID := uuid.New().String()
 		ts := msg.Timestamp
 		if ts.IsZero() {
@@ -115,7 +135,7 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 		}
 		// Increment timestamp by message index to ensure stable ordering in the
 		// database, as OpenCode relies on time_created for message sequence.
-		msgCreated := ts.UnixMilli() + int64(i)
+		msgCreated := max(ts.UnixMilli(), after+1) + int64(i)
 
 		var msgData []byte
 		if msg.Role == domain.RoleAssistant {
@@ -125,7 +145,7 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 				"agent":      "build",
 				"modelID":    "",
 				"providerID": "",
-				"path":       map[string]string{"cwd": thread.WorkspacePath, "root": thread.WorkspacePath},
+				"path":       map[string]string{"cwd": workspace, "root": workspace},
 				"tokens": map[string]interface{}{
 					"total":     0,
 					"input":     0,
@@ -148,12 +168,12 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 			})
 		}
 
-		_, err = tx.ExecContext(ctx,
+		_, err := tx.ExecContext(ctx,
 			`INSERT INTO message (id, session_id, data, time_created, time_updated) VALUES (?, ?, ?, ?, ?)`,
 			msgID, sessionID, string(msgData), msgCreated, msgCreated,
 		)
 		if err != nil {
-			return "", fmt.Errorf("insert message: %w", err)
+			return fmt.Errorf("insert message: %w", err)
 		}
 
 		partData, _ := json.Marshal(map[string]string{"type": "text", "text": msg.Content})
@@ -162,15 +182,58 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 			uuid.New().String(), msgID, sessionID, string(partData), msgCreated, msgCreated,
 		)
 		if err != nil {
-			return "", fmt.Errorf("insert part: %w", err)
+			return fmt.Errorf("insert part: %w", err)
 		}
 	}
+	return nil
+}
 
-	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("commit: %w", err)
+// AppendMessages adds messages to the end of an existing session, so
+// `opencode -s` continues the same session with them in its history.
+func (w *Writer) AppendMessages(ctx context.Context, target domain.Thread, messages []domain.Message) error {
+	dbPath := target.SourceFilePath
+	if dbPath == "" {
+		dbPath = w.dbPath
+	}
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer db.Close()
+
+	table, err := sessionTable(ctx, db)
+	if err != nil {
+		return err
+	}
+	if table == sessionTableV2 {
+		return w.appendV2(ctx, db, target, messages)
 	}
 
-	return sessionID, nil
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var newest sql.NullInt64
+	err = tx.QueryRowContext(ctx,
+		`SELECT (SELECT MAX(time_created) FROM message WHERE session_id = s.id) FROM session s WHERE s.id = ?`,
+		target.OriginalID,
+	).Scan(&newest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("opencode session %s not found", target.OriginalID)
+	}
+	if err != nil {
+		return fmt.Errorf("read session: %w", err)
+	}
+
+	if err := insertMessagesV1(ctx, tx, target.OriginalID, target.WorkspacePath, messages, newest.Int64); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE session SET time_updated = ? WHERE id = ?`, time.Now().UnixMilli(), target.OriginalID); err != nil {
+		return fmt.Errorf("update session: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (w *Writer) DeleteThread(ctx context.Context, thread domain.Thread) error {

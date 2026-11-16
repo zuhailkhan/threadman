@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,5 +106,45 @@ func TestFlatLayoutRoundTrip(t *testing.T) {
 	threads, err := (&Provider{baseDir: dir}).DiscoverThreads(context.Background())
 	if err != nil || len(threads) != 1 || threads[0].Title != "flat" {
 		t.Errorf("discover flat: %v %+v", err, threads)
+	}
+}
+
+func TestAppendMessagesContinuesActiveBranch(t *testing.T) {
+	p := writeSession(t,
+		header,
+		`{"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"first"}}`,
+		`{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"reply"}]}}`,
+		`{"type":"session_info","id":"i1","parentId":"a1","timestamp":"2026-01-01T00:00:03.000Z","name":"My thread"}`,
+	)
+	threads, err := p.DiscoverThreads(context.Background())
+	if err != nil || len(threads) != 1 {
+		t.Fatalf("discover: %v, %d", err, len(threads))
+	}
+
+	w := &Writer{baseDir: p.baseDir}
+	err = w.AppendMessages(context.Background(), threads[0], []domain.Message{
+		{Role: domain.RoleUser, Content: "[threadman handoff h1]\nblock", Timestamp: time.Date(2026, 1, 1, 0, 1, 0, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("AppendMessages: %v", err)
+	}
+
+	full, err := p.GetThreadDetails(context.Background(), threads[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, m := range full.Messages {
+		got = append(got, m.Content)
+	}
+	want := []string{"first", "reply", "[threadman handoff h1]\nblock"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("active branch after append: %q, want %q", got, want)
+	}
+
+	// The session keeps its identity and name.
+	again, _ := p.DiscoverThreads(context.Background())
+	if len(again) != 1 || again[0].OriginalID != "sess-1" || again[0].Title != "My thread" {
+		t.Errorf("after append: %+v", again)
 	}
 }

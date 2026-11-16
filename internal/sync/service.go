@@ -31,71 +31,66 @@ func New(providers []ports.ThreadProvider, repo ports.ThreadRepository) *Service
 
 func (s *Service) SyncAll(ctx context.Context) []SyncResult {
 	results := make([]SyncResult, 0, len(s.providers))
-
 	for _, p := range s.providers {
-		result := SyncResult{Provider: p.Name()}
-
-		threads, err := p.DiscoverThreads(ctx)
-		if err != nil {
-			if errors.Is(err, ports.ErrSourceUnavailable) {
-				result.Unavailable = true
-				results = append(results, result)
-				continue
-			}
-			result.Err = err
-			results = append(results, result)
-			continue
-		}
-		result.ThreadsFound = len(threads)
-
-		discoveredIDs := make([]string, 0, len(threads))
-		for _, t := range threads {
-			discoveredIDs = append(discoveredIDs, t.ID)
-			full, err := p.GetThreadDetails(ctx, t)
-			if err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", t.OriginalID, err))
-				continue
-			}
-			markHandoffs(&full)
-			if !hasUserMessage(full.Messages) {
-				result.Skipped++
-				continue
-			}
-			full.LastSyncedAt = time.Now()
-			if err := s.repo.UpsertThread(ctx, full); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("save %s: %v", t.OriginalID, err))
-				continue
-			}
-			result.ThreadsSaved++
-		}
-
-		// Finding nothing is not evidence that everything was deleted: session
-		// files that can't be read or recognised are skipped without an error, so
-		// pruning on an empty discovery could erase the provider's stored history.
-		if len(discoveredIDs) > 0 {
-			if err := s.repo.DeleteThreadsNotIn(ctx, p.Name(), discoveredIDs); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("prune stale threads: %v", err))
-			}
-		}
-
-		results = append(results, result)
+		results = append(results, s.syncProvider(ctx, p))
 	}
-
 	return results
 }
 
-func (s *Service) SyncProvider(ctx context.Context, name string) (SyncResult, bool) {
+// SyncProvider syncs one provider. ok is false when no provider has that name.
+func (s *Service) SyncProvider(ctx context.Context, name string) (result SyncResult, ok bool) {
 	for _, p := range s.providers {
 		if p.Name() == name {
-			results := s.SyncAll(ctx)
-			for _, r := range results {
-				if r.Provider == name {
-					return r, true
-				}
-			}
+			return s.syncProvider(ctx, p), true
 		}
 	}
 	return SyncResult{}, false
+}
+
+func (s *Service) syncProvider(ctx context.Context, p ports.ThreadProvider) SyncResult {
+	result := SyncResult{Provider: p.Name()}
+
+	threads, err := p.DiscoverThreads(ctx)
+	if err != nil {
+		if errors.Is(err, ports.ErrSourceUnavailable) {
+			result.Unavailable = true
+		} else {
+			result.Err = err
+		}
+		return result
+	}
+	result.ThreadsFound = len(threads)
+
+	discoveredIDs := make([]string, 0, len(threads))
+	for _, t := range threads {
+		discoveredIDs = append(discoveredIDs, t.ID)
+		full, err := p.GetThreadDetails(ctx, t)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", t.OriginalID, err))
+			continue
+		}
+		markHandoffs(&full)
+		if !hasUserMessage(full.Messages) {
+			result.Skipped++
+			continue
+		}
+		full.LastSyncedAt = time.Now()
+		if err := s.repo.UpsertThread(ctx, full); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("save %s: %v", t.OriginalID, err))
+			continue
+		}
+		result.ThreadsSaved++
+	}
+
+	// Finding nothing is not evidence that everything was deleted: session
+	// files that can't be read or recognised are skipped without an error, so
+	// pruning on an empty discovery could erase the provider's stored history.
+	if len(discoveredIDs) > 0 {
+		if err := s.repo.DeleteThreadsNotIn(ctx, p.Name(), discoveredIDs); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("prune stale threads: %v", err))
+		}
+	}
+	return result
 }
 
 // markHandoffs finds the blocks threadman wrote into a session and files them

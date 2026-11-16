@@ -8,14 +8,26 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/zuhailkhan/threadman/internal/conversation"
 	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/handoff"
 	"github.com/zuhailkhan/threadman/internal/ports"
 )
 
 type fakeWriter struct {
-	name    string
-	written []domain.Thread
+	name     string
+	written  []domain.Thread
+	appended []appendCall
+}
+
+type appendCall struct {
+	target   domain.Thread
+	messages []domain.Message
+}
+
+func (w *fakeWriter) AppendMessages(ctx context.Context, target domain.Thread, messages []domain.Message) error {
+	w.appended = append(w.appended, appendCall{target, messages})
+	return nil
 }
 
 func (w *fakeWriter) Name() string { return w.name }
@@ -77,6 +89,16 @@ func TestHandoffModeDialogWithoutLLM(t *testing.T) {
 	if m.state != stateHandoffPicker {
 		t.Fatalf("state after h = %v", m.state)
 	}
+	// Claude already holds the whole thread, so the cursor starts on pi.
+	view := m.View()
+	for _, want := range []string{"up to date", "new session"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("picker missing %q:\n%s", want, view)
+		}
+	}
+	if m.handoffTargets[m.handoffCursor].writer != target {
+		t.Fatalf("cursor on %s, want pi", m.handoffTargets[m.handoffCursor].writer.Name())
+	}
 
 	m, check := press(t, m, "enter")
 	if m.state != stateHandoffMode || !m.llmChecking {
@@ -88,7 +110,7 @@ func TestHandoffModeDialogWithoutLLM(t *testing.T) {
 
 	next, _ := m.Update(check())
 	m = asModel(next)
-	view := m.View()
+	view = m.View()
 	for _, want := range []string{"Detailed summary", "Light summary", "Full transcript", "not configured", "press L"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("mode dialog missing %q:\n%s", want, view)
@@ -136,12 +158,12 @@ func TestHandoffModeDialogWithoutLLM(t *testing.T) {
 // A received handoff block shows as a divider, not as something the user typed.
 func TestRenderThreadShowsHandoffAsDivider(t *testing.T) {
 	block := domain.HandoffMarker("h-1", "from Claude Code · full transcript · 4 messages") + "\n\n[User]\nsecret detail"
-	out := renderThread(domain.Thread{Messages: []domain.Message{
+	out := renderThread(domain.Thread{Provider: "pi", Messages: []domain.Message{
 		{Role: domain.RoleUser, Content: block, Kind: domain.KindHandoff, HandoffID: "h-1"},
 		{Role: domain.RoleUser, Content: "now add tests"},
 	}})
 
-	if !strings.Contains(out, "handoff received · from Claude Code · full transcript · 4 messages") {
+	if !strings.Contains(out, "handed off to pi · from Claude Code · full transcript · 4 messages") {
 		t.Errorf("divider missing:\n%s", out)
 	}
 	if strings.Contains(out, "secret detail") || strings.Count(out, "You:") != 1 {
@@ -157,6 +179,7 @@ func TestHandoffCancel(t *testing.T) {
 		height:        30,
 		thread:        domain.Thread{Messages: []domain.Message{{Role: domain.RoleUser, Content: "hello"}}},
 		handoffTarget: target,
+		handoffChoice: handoffTarget{writer: target, missed: []conversation.Entry{{Provider: "claude", Message: domain.Message{Role: domain.RoleUser, Content: "hello"}}}},
 		summarizer:    handoff.NewSummarizer(filepath.Join(t.TempDir(), "config.json")),
 	}
 	m.handoffModeCursor = m.firstUsableMode()

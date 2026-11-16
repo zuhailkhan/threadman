@@ -46,8 +46,6 @@ type onboardingProvider struct {
 }
 
 type syncDoneMsg struct{ results []syncsvc.SyncResult }
-type threadLoadedMsg struct{ thread domain.Thread }
-type threadRefreshedMsg struct{ thread domain.Thread }
 type backgroundThreadsMsg []domain.Thread
 type hookSetupDoneMsg struct{ errs []error }
 type dbChangedMsg struct{}
@@ -57,6 +55,12 @@ type handoffWrittenMsg struct {
 	sessionID string
 	writer    ports.ThreadWriter
 	record    domain.Handoff
+	// workspace is where the target session runs.
+	workspace string
+	// appended is set when the messages went into an existing session.
+	appended bool
+	// count is how many messages were carried.
+	count int
 }
 type handoffErrMsg struct{ err error }
 type handoffLinkErrMsg struct{ err error }
@@ -82,9 +86,13 @@ type Model struct {
 	onboardingCursor    int
 	writers             []ports.ThreadWriter
 	handoffCursor       int
-	handoffTargets      []ports.ThreadWriter
+	handoffTargets      []handoffTarget
+	handoffChoice       handoffTarget
 	handoffTarget       ports.ThreadWriter
 	handoffSessionID    string
+	handoffWorkspace    string
+	handoffAppended     bool
+	handoffCount        int
 	handoffModeCursor   int
 	handoffMode         handoff.Mode
 	handoffCancel       context.CancelFunc
@@ -260,87 +268,11 @@ func (m Model) backgroundLoadThreads() tea.Cmd {
 	}
 }
 
-func (m Model) refreshCurrentThread() tea.Cmd {
-	id := m.thread.ID
-	return func() tea.Msg {
-		thread, err := m.svc.GetThread(context.Background(), id)
-		if err != nil {
-			return nil
-		}
-		return threadRefreshedMsg{thread}
-	}
-}
-
 func (m Model) syncAll() tea.Cmd {
 	return func() tea.Msg {
 		results := m.svc.SyncAll(context.Background())
 		return syncDoneMsg{results}
 	}
-}
-
-func (m Model) openThread(t domain.Thread) tea.Cmd {
-	return func() tea.Msg {
-		full, err := m.svc.GetThread(context.Background(), t.ID)
-		if err != nil {
-			return errMsg{err}
-		}
-		return threadLoadedMsg{full}
-	}
-}
-
-// writeHandoff builds the copy for the chosen mode and writes it into the
-// target provider. m.thread itself is only read.
-func (m Model) writeHandoff(ctx context.Context, w ports.ThreadWriter, mode handoff.Mode) tea.Cmd {
-	t := m.thread
-	s := m.summarizer
-	return func() tea.Msg {
-		timeout := 30 * time.Second
-		if mode.NeedsLLM() {
-			timeout = 10 * time.Minute
-		}
-		ctx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		out, record, err := s.Prepare(ctx, t, mode)
-		if err != nil {
-			return handoffErrMsg{err}
-		}
-		if err := ctx.Err(); err != nil {
-			return handoffErrMsg{err}
-		}
-		id, err := w.WriteThread(ctx, out)
-		if err != nil {
-			return handoffErrMsg{err}
-		}
-		record.TargetProvider = w.Name()
-		record.TargetOriginalID = id
-		return handoffWrittenMsg{sessionID: id, writer: w, record: record}
-	}
-}
-
-func (m Model) recordHandoffLink(record domain.Handoff) tea.Cmd {
-	source := m.thread
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := m.svc.RecordHandoff(ctx, source, record); err != nil {
-			return handoffLinkErrMsg{err}
-		}
-		return nil
-	}
-}
-
-func (m Model) availableHandoffTargets() []ports.ThreadWriter {
-	inGroup := map[string]bool{}
-	for _, t := range m.groupThreads {
-		inGroup[t.Provider] = true
-	}
-	available := make([]ports.ThreadWriter, 0, len(m.writers))
-	for _, w := range m.writers {
-		if !inGroup[w.Name()] {
-			available = append(available, w)
-		}
-	}
-	return available
 }
 
 func (m Model) archiveThreadCmd(t domain.Thread) tea.Cmd {
@@ -466,7 +398,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case stateList, stateSearch:
 			cmds = append(cmds, m.backgroundLoadThreads())
 		case stateThread:
-			cmds = append(cmds, m.refreshCurrentThread())
+			cmds = append(cmds, m.loadGroup(m.thread, m.groupThreads, false))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -474,29 +406,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.threads = []domain.Thread(msg)
 		m.groups = buildGroups(m.threads)
 		m.applyFilter()
+		// A handoff can add a session to the open conversation.
 		if m.state == stateThread {
 			for _, g := range m.groups {
-				if g.Primary.ID == m.thread.ID {
-					m.groupThreads = g.Members
-					break
+				if containsThread(g.Members, m.thread.ID) && !sameMembers(g.Members, m.groupThreads) {
+					return m, m.loadGroup(m.thread, g.Members, false)
 				}
 			}
 		}
 
-	case threadLoadedMsg:
-		m.thread = msg.thread
-		m.state = stateThread
-		m.viewport.SetContent(renderThread(msg.thread))
-		m.viewport.GotoBottom()
-
-	case threadRefreshedMsg:
-		if m.state == stateThread {
-			prevCount := len(m.thread.Messages)
-			m.thread = msg.thread
-			m.viewport.SetContent(renderThread(msg.thread))
-			if len(msg.thread.Messages) > prevCount {
-				m.viewport.GotoBottom()
-			}
+	case groupLoadedMsg:
+		if !msg.initial && (m.state != stateThread || !containsThread(msg.members, m.thread.ID)) {
+			return m, nil
+		}
+		prev := 0
+		for _, t := range m.groupThreads {
+			prev += len(t.Messages)
+		}
+		m.thread = msg.primary
+		m.groupThreads = msg.members
+		m.viewport.SetContent(renderConversation(msg.members))
+		now := 0
+		for _, t := range msg.members {
+			now += len(t.Messages)
+		}
+		if msg.initial {
+			m.state = stateThread
+			m.viewport.GotoBottom()
+		} else if now > prev {
+			m.viewport.GotoBottom()
 		}
 		return m, nil
 
@@ -511,6 +449,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handoffCancel = nil
 		m.handoffTarget = msg.writer
 		m.handoffSessionID = msg.sessionID
+		m.handoffWorkspace = msg.workspace
+		m.handoffAppended = msg.appended
+		m.handoffCount = msg.count
 		m.status = ""
 		m.state = stateHandoffConfirm
 		return m, m.recordHandoffLink(msg.record)
@@ -555,17 +496,13 @@ func (m Model) syncSelected() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		results := m.svc.SyncAll(context.Background())
-		filtered := results[:0]
-		for _, r := range results {
-			for _, name := range selected {
-				if r.Provider == name {
-					filtered = append(filtered, r)
-					break
-				}
+		results := make([]syncsvc.SyncResult, 0, len(selected))
+		for _, name := range selected {
+			if r, ok := m.svc.SyncProvider(context.Background(), name); ok {
+				results = append(results, r)
 			}
 		}
-		return syncDoneMsg{filtered}
+		return syncDoneMsg{results}
 	}
 }
 
@@ -622,7 +559,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.filteredGroups) > 0 {
 				g := m.filteredGroups[m.cursor]
 				m.groupThreads = g.Members
-				return m, m.openThread(g.Primary)
+				return m, m.loadGroup(g.Primary, g.Members, true)
 			}
 		case "s":
 			m.status = "syncing..."
@@ -715,16 +652,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.resumeCursor = 0
 			m.state = stateResumePicker
 		case "h":
-			if len(m.thread.Messages) == 0 {
-				m.status = "no messages to hand off"
+			m.handoffTargets = m.handoffTargetsFor()
+			first, ok := firstUsableTarget(m.handoffTargets)
+			if !ok {
+				m.status = "every tool is up to date with this conversation"
 				return m, nil
 			}
-			m.handoffTargets = m.availableHandoffTargets()
-			if len(m.handoffTargets) == 0 {
-				m.status = "thread already exists in all providers"
-				return m, nil
-			}
-			m.handoffCursor = 0
+			m.handoffCursor = first
 			m.state = stateHandoffPicker
 		default:
 			var cmd tea.Cmd
@@ -737,18 +671,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc", "q":
 			m.state = stateThread
 		case "up", "k":
-			if m.handoffCursor > 0 {
-				m.handoffCursor--
+			for i := m.handoffCursor - 1; i >= 0; i-- {
+				if m.handoffTargets[i].usable() {
+					m.handoffCursor = i
+					break
+				}
 			}
 		case "down", "j":
-			if m.handoffCursor < len(m.handoffTargets)-1 {
-				m.handoffCursor++
+			for i := m.handoffCursor + 1; i < len(m.handoffTargets); i++ {
+				if m.handoffTargets[i].usable() {
+					m.handoffCursor = i
+					break
+				}
 			}
 		case "enter":
-			if len(m.handoffTargets) == 0 {
+			if m.handoffCursor >= len(m.handoffTargets) || !m.handoffTargets[m.handoffCursor].usable() {
 				return m, nil
 			}
-			m.handoffTarget = m.handoffTargets[m.handoffCursor]
+			m.handoffChoice = m.handoffTargets[m.handoffCursor]
+			m.handoffTarget = m.handoffChoice.writer
 			m.state = stateHandoffMode
 			// Re-check so an LLM server started (or configured) since launch
 			// is picked up.
@@ -790,7 +731,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.handoffMode = mode
 			m.status = ""
 			m.state = stateHandoffWorking
-			return m, m.writeHandoff(ctx, m.handoffTarget, mode)
+			return m, m.writeHandoff(ctx, m.handoffChoice, mode)
 		}
 
 	case stateHandoffWorking:
@@ -808,12 +749,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "y", "Y":
 			m.state = stateThread
 			m.status = ""
-			cmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.thread.WorkspacePath)
+			cmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.handoffWorkspace)
 			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 				return nil
 			})
 		case "n", "N", "esc":
-			openCmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.thread.WorkspacePath)
+			openCmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.handoffWorkspace)
 			m.status = "run: " + strings.Join(openCmd.Args, " ")
 			m.state = stateThread
 		}
@@ -1076,22 +1017,22 @@ func (m Model) viewHookSetup() string {
 }
 
 func (m Model) viewHandoffPicker() string {
-	dialogWidth := 40
+	dialogWidth := 48
 
 	var inner strings.Builder
 	inner.WriteString("\n")
 	inner.WriteString("  Hand off to:\n")
 	inner.WriteString("\n")
-	for i, w := range m.handoffTargets {
-		label := providerLabels[w.Name()]
-		if label == "" {
-			label = w.Name()
+	for i, t := range m.handoffTargets {
+		text := fmt.Sprintf("%-12s %s", domain.ProviderLabel(t.writer.Name()), t.status())
+		switch {
+		case !t.usable():
+			inner.WriteString(styleHint.Render("  "+text) + "\n")
+		case i == m.handoffCursor:
+			inner.WriteString(styleCursor.Render("▶") + " " + text + "\n")
+		default:
+			inner.WriteString("  " + text + "\n")
 		}
-		line := fmt.Sprintf("  %s", label)
-		if i == m.handoffCursor {
-			line = styleCursor.Render("▶") + fmt.Sprintf(" %s", label)
-		}
-		inner.WriteString(line + "\n")
 	}
 	inner.WriteString("\n")
 	inner.WriteString(styleHint.Render("  ↑↓ navigate  Enter select  Esc back") + "\n")
@@ -1147,7 +1088,11 @@ func (m Model) viewHandoffMode() string {
 
 	var inner strings.Builder
 	inner.WriteString("\n")
-	inner.WriteString(fmt.Sprintf("  Hand off to %s as:\n", label))
+	if m.handoffChoice.session != nil {
+		inner.WriteString(fmt.Sprintf("  Catch %s up on %s as:\n", label, m.handoffChoice.status()))
+	} else {
+		inner.WriteString(fmt.Sprintf("  Hand off to %s as:\n", label))
+	}
 	inner.WriteString("\n")
 	for i, mode := range handoff.Modes {
 		switch {
@@ -1251,8 +1196,12 @@ func (m Model) viewHandoffConfirm() string {
 	}
 
 	var prompt string
-	if m.handoffTarget.Name() == m.thread.Provider {
-		prompt = fmt.Sprintf("  Resume existing session in %s?", label)
+	if m.handoffAppended {
+		noun := "messages"
+		if m.handoffCount == 1 {
+			noun = "message"
+		}
+		prompt = fmt.Sprintf("  Added %d %s to %s.\n  Resume it now?", m.handoffCount, noun, label)
 	} else {
 		prompt = fmt.Sprintf("  Open in %s?", label)
 	}
@@ -1501,39 +1450,6 @@ func renderListRow(n int, g ThreadGroup, width int) string {
 	}
 	date := lastMessageDate(g.Primary)
 	return fmt.Sprintf("%-3d  %s  %-*s  %-18s  %s", n, icons, titleWidth, title, ws, date)
-}
-
-func renderThread(t domain.Thread) string {
-	var b strings.Builder
-	sep := styleSep.Render(strings.Repeat("─", 80))
-	for _, m := range t.Messages {
-		if m.Kind == domain.KindHandoff {
-			b.WriteString(handoffDivider(m) + "\n")
-			continue
-		}
-		switch m.Role {
-		case domain.RoleUser:
-			b.WriteString(styleYou.Render("You:") + "\n")
-		case domain.RoleAssistant:
-			b.WriteString(styleAssistant.Render("Assistant:") + "\n")
-		default:
-			b.WriteString(string(m.Role) + ":\n")
-		}
-		b.WriteString(m.Content + "\n")
-		b.WriteString(sep + "\n")
-	}
-	return b.String()
-}
-
-// handoffDivider stands in for a handoff block threadman wrote into this
-// session. The block repeats a conversation already readable on its source
-// thread, so only its description is shown.
-func handoffDivider(m domain.Message) string {
-	label := "handoff received"
-	if _, detail, ok := domain.ParseHandoffMarker(m.Content); ok && detail != "" {
-		label += " · " + detail
-	}
-	return styleHint.Render("──── " + label + " ────")
 }
 
 func lastMessageDate(t domain.Thread) string {
