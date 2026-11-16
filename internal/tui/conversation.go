@@ -251,10 +251,29 @@ func renderConversation(threads []domain.Thread) string {
 		default:
 			b.WriteString(tag + string(m.Role) + ":\n")
 		}
-		b.WriteString(m.Content + "\n")
+		if m.Content != "" {
+			b.WriteString(m.Content + "\n")
+		}
+		for _, call := range m.Tools {
+			b.WriteString(toolLine(call) + "\n")
+		}
 		b.WriteString(sep + "\n")
 	}
 	return b.String()
+}
+
+// toolLine is a one-line summary of a tool call for the reader: the tool and
+// the first line of its input. threadman show prints calls in full.
+func toolLine(call domain.ToolCall) string {
+	input, _, _ := strings.Cut(call.Input, "\n")
+	text := "  ▸ " + call.Name
+	if input != "" {
+		text += "  " + truncateRunes(input, 100)
+	}
+	if call.Error {
+		text += "  (failed)"
+	}
+	return styleHint.Render(text)
 }
 
 // renderThread lays out a single session.

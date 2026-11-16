@@ -418,3 +418,30 @@ func TestRealOpencodeV2(t *testing.T) {
 		t.Errorf("second delete should be a no-op: %v", err)
 	}
 }
+
+// The assistant message OpenCode 2.2.7 stored for a bash call, as written by
+// a real `opencode run`.
+const v2ToolMessage = `{"agent":"build","content":[{"type":"reasoning","text":"Let me do that.","time":{"created":1,"completed":2}},{"type":"tool","id":"chatcmpl-tool-8b10","name":"shell","executed":false,"state":{"status":"completed","input":{"command":"echo threadman-probe"},"content":[{"type":"text","text":"threadman-probe\n"}],"metadata":{"status":"completed","truncated":false,"exit":0}},"time":{"created":1,"ran":2,"completed":3}}],"finish":"tool-calls","model":{"id":"m"}}`
+
+func TestGetThreadDetailsV2CapturesToolCalls(t *testing.T) {
+	dbPath, db := setupV2DB(t)
+	insertSessionV2(t, db, "ses_1", nil, "Tools")
+	insertMessageV2(t, db, "ses_1", "m1", "user", 1, `{"text":"run it"}`)
+	insertMessageV2(t, db, "ses_1", "m2", "assistant", 2, v2ToolMessage)
+	insertMessageV2(t, db, "ses_1", "m3", "assistant", 3,
+		`{"content":[{"type":"tool","name":"read","state":{"status":"error","input":{"filePath":"x"},"error":{"message":"File not found"}}}]}`)
+
+	full, err := (&Provider{dbPath: dbPath}).GetThreadDetails(context.Background(), domain.Thread{OriginalID: "ses_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Messages) != 3 {
+		t.Fatalf("got %d messages, want 3; tool-only turns must be kept", len(full.Messages))
+	}
+	if got := full.Messages[1].Tools; len(got) != 1 || got[0] != (domain.ToolCall{Name: "shell", Input: "echo threadman-probe", Output: "threadman-probe\n"}) {
+		t.Errorf("tools = %+v", got)
+	}
+	if got := full.Messages[2].Tools; len(got) != 1 || !got[0].Error || got[0].Output != "File not found" {
+		t.Errorf("failed call = %+v", got)
+	}
+}

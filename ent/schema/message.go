@@ -19,6 +19,8 @@ func (Message) Fields() []ent.Field {
 		// "" for an ordinary message, "handoff" for a block threadman wrote.
 		field.String("kind").Default(""),
 		field.String("handoff_id").Default(""),
+		// The turn's tool calls as JSON; empty when there were none.
+		field.String("tools").Default(""),
 	}
 }
 

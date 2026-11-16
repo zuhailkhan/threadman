@@ -35,6 +35,7 @@ var (
 		{Name: "timestamp", Type: field.TypeTime},
 		{Name: "kind", Type: field.TypeString, Default: ""},
 		{Name: "handoff_id", Type: field.TypeString, Default: ""},
+		{Name: "tools", Type: field.TypeString, Default: ""},
 		{Name: "thread_messages", Type: field.TypeString, Nullable: true},
 	}
 	// MessagesTable holds the schema information for the "messages" table.
@@ -45,7 +46,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "messages_threads_messages",
-				Columns:    []*schema.Column{MessagesColumns[6]},
+				Columns:    []*schema.Column{MessagesColumns[7]},
 				RefColumns: []*schema.Column{ThreadsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},

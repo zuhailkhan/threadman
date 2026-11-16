@@ -129,6 +129,7 @@ func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
 			SetTimestamp(m.Timestamp).
 			SetKind(string(m.Kind)).
 			SetHandoffID(m.HandoffID).
+			SetTools(domain.EncodeTools(m.Tools)).
 			SetThreadID(t.ID)
 	}
 
@@ -375,6 +376,7 @@ func mapEntThreadToDomain(e *ent.Thread) domain.Thread {
 			Timestamp: m.Timestamp,
 			Kind:      domain.MessageKind(m.Kind),
 			HandoffID: m.HandoffID,
+			Tools:     domain.DecodeTools(m.Tools),
 		}
 	}
 

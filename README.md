@@ -74,7 +74,23 @@ Pressing `h` in a thread asks for the target provider and then for a mode:
 
 The original thread is never changed. Whatever the mode, the new session holds a single message from threadman: a handoff block that says where the conversation came from, how to read the original (`threadman show <thread-id>`), and then the brief and messages, each labelled with who wrote it. The other model's replies are not written as the new model's own turns, so it reads them as an account from another tool rather than as things it said.
 
-In the summary modes the newest messages are kept word for word after the brief, since those carry the task in progress. The kept messages always start on one of yours, so a few more than 6 or 2 may be kept. A thread with nothing older than that is handed over whole. Summaries are written from message text only, because threadman does not store tool calls or command output.
+In the summary modes the newest messages are kept word for word after the brief, since those carry the task in progress. The kept messages always start on one of yours, so a few more than 6 or 2 may be kept. A thread with nothing older than that is handed over whole.
+
+### Tool history
+
+threadman keeps each turn's tool calls (the tool, its input such as the command run, its output up to 2,000 characters, and whether it failed) from Claude Code, OpenCode and pi. The thread reader shows one dim line per call, and `threadman show` prints them in full.
+
+Handoff blocks carry them too, under the turn that made them:
+
+```
+[Assistant · OpenCode · 2026-11-16 10:02]
+Let me check.
+
+→ shell (failed): go build ./...
+    internal/sync/service.go:88:3: undefined: pruneStale
+```
+
+Each output is cut to 800 characters. If a block would still be larger than about 300 KB (around 75k tokens), outputs are cut to 200 characters and then left out, keeping every call, and the block says so. A conversation too long even then is better handed off as a summary. The summarizer sees each call with a short output, so briefs can say what was actually run.
 
 Every handoff is recorded in threadman's database with the exact text sent. When the new session is synced, threadman recognises its block: the thread reader shows it as a divider, search skips it, and it doesn't become the session's title.
 

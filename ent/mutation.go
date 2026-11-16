@@ -842,6 +842,7 @@ type MessageMutation struct {
 	timestamp     *time.Time
 	kind          *string
 	handoff_id    *string
+	tools         *string
 	clearedFields map[string]struct{}
 	thread        *string
 	clearedthread bool
@@ -1134,6 +1135,42 @@ func (m *MessageMutation) ResetHandoffID() {
 	m.handoff_id = nil
 }
 
+// SetTools sets the "tools" field.
+func (m *MessageMutation) SetTools(s string) {
+	m.tools = &s
+}
+
+// Tools returns the value of the "tools" field in the mutation.
+func (m *MessageMutation) Tools() (r string, exists bool) {
+	v := m.tools
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTools returns the old "tools" field's value of the Message entity.
+// If the Message object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *MessageMutation) OldTools(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTools is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTools requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTools: %w", err)
+	}
+	return oldValue.Tools, nil
+}
+
+// ResetTools resets all changes to the "tools" field.
+func (m *MessageMutation) ResetTools() {
+	m.tools = nil
+}
+
 // SetThreadID sets the "thread" edge to the Thread entity by id.
 func (m *MessageMutation) SetThreadID(id string) {
 	m.thread = &id
@@ -1207,7 +1244,7 @@ func (m *MessageMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *MessageMutation) Fields() []string {
-	fields := make([]string, 0, 5)
+	fields := make([]string, 0, 6)
 	if m.role != nil {
 		fields = append(fields, message.FieldRole)
 	}
@@ -1222,6 +1259,9 @@ func (m *MessageMutation) Fields() []string {
 	}
 	if m.handoff_id != nil {
 		fields = append(fields, message.FieldHandoffID)
+	}
+	if m.tools != nil {
+		fields = append(fields, message.FieldTools)
 	}
 	return fields
 }
@@ -1241,6 +1281,8 @@ func (m *MessageMutation) Field(name string) (ent.Value, bool) {
 		return m.Kind()
 	case message.FieldHandoffID:
 		return m.HandoffID()
+	case message.FieldTools:
+		return m.Tools()
 	}
 	return nil, false
 }
@@ -1260,6 +1302,8 @@ func (m *MessageMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldKind(ctx)
 	case message.FieldHandoffID:
 		return m.OldHandoffID(ctx)
+	case message.FieldTools:
+		return m.OldTools(ctx)
 	}
 	return nil, fmt.Errorf("unknown Message field %s", name)
 }
@@ -1303,6 +1347,13 @@ func (m *MessageMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetHandoffID(v)
+		return nil
+	case message.FieldTools:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTools(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Message field %s", name)
@@ -1367,6 +1418,9 @@ func (m *MessageMutation) ResetField(name string) error {
 		return nil
 	case message.FieldHandoffID:
 		m.ResetHandoffID()
+		return nil
+	case message.FieldTools:
+		m.ResetTools()
 		return nil
 	}
 	return fmt.Errorf("unknown Message field %s", name)

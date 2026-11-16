@@ -258,7 +258,14 @@ func build(ctx context.Context, c llm.Client, summarizer string, t domain.Thread
 	if n := len(t.Messages); n > 0 {
 		h.SourceLastMessageID = t.Messages[n-1].ID
 	}
-	h.Content = composeBlock(h.ID, t, mode, split, summary, summarizer, catchUp)
+	// Tool output is what makes a block large. Each smaller budget is tried
+	// in turn until the block fits; every call keeps its name and input.
+	for _, budget := range toolOutputBudgets {
+		h.Content = composeBlock(h.ID, t, mode, split, summary, summarizer, catchUp, budget)
+		if len(h.Content) <= maxBlockBytes {
+			break
+		}
+	}
 
 	out := t
 	out.Messages = []domain.Message{{
@@ -275,7 +282,7 @@ func build(ctx context.Context, c llm.Client, summarizer string, t domain.Thread
 // composeBlock writes the handoff block: a marker line threadman recognises on
 // sync, a note on where the content came from, then the brief and the
 // messages handed over word for word.
-func composeBlock(id string, t domain.Thread, mode Mode, split int, summary, summarizer string, catchUp bool) string {
+func composeBlock(id string, t domain.Thread, mode Mode, split int, summary, summarizer string, catchUp bool, toolOutput int) string {
 	source := sourceLabel(t)
 	total := len(t.Messages)
 	noun := "message"
@@ -307,6 +314,16 @@ func composeBlock(id string, t domain.Thread, mode Mode, split int, summary, sum
 	if t.ID != "" {
 		fmt.Fprintf(&b, "To read the original conversation in full, run: threadman show %s\n\n", t.ID)
 	}
+	if hasTools(t.Messages[split:]) {
+		switch {
+		case toolOutput == 0:
+			b.WriteString("Lines starting with → are tool calls the assistant made. Their output is left out to keep this message small; check results against the files.\n\n")
+		case toolOutput < toolOutputBudgets[0]:
+			fmt.Fprintf(&b, "Lines starting with → are tool calls the assistant made, with their output below them cut to %d characters to keep this message small.\n\n", toolOutput)
+		default:
+			fmt.Fprintf(&b, "Lines starting with → are tool calls the assistant made, with their output below them, cut to %d characters each.\n\n", toolOutput)
+		}
+	}
 
 	if mode.NeedsLLM() {
 		b.WriteString("## Brief\n\n")
@@ -317,7 +334,7 @@ func composeBlock(id string, t domain.Thread, mode Mode, split int, summary, sum
 		b.WriteString("## Conversation\n\n")
 	}
 	for _, m := range t.Messages[split:] {
-		writeTurn(&b, m, t.Provider)
+		writeTurn(&b, m, t.Provider, toolOutput)
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
@@ -347,6 +364,31 @@ func sourceLabel(t domain.Thread) string {
 	}
 }
 
+// A handoff block carries every tool call but less of each result than
+// threadman stores: a long session can run thousands of calls, and the block
+// has to fit in the receiving model's context.
+const (
+	blockToolInput  = 300
+	blockToolOutput = 800
+	// maxBlockBytes is what a block aims to stay under, about 75k tokens.
+	maxBlockBytes = 300_000
+	// The summarizer only needs to know what was done, not what came back.
+	briefToolInput  = 200
+	briefToolOutput = 200
+)
+
+// toolOutputBudgets are the per-call output limits tried, largest first.
+var toolOutputBudgets = []int{blockToolOutput, 200, 0}
+
+func hasTools(messages []domain.Message) bool {
+	for _, m := range messages {
+		if len(m.Tools) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func plural(n int, noun string) string {
 	if n == 1 {
 		return "1 " + noun
@@ -357,7 +399,7 @@ func plural(n int, noun string) string {
 // writeTurn writes one message under a label naming who wrote it. An
 // assistant turn names the tool it was written in: the message's own
 // provider, or the thread's.
-func writeTurn(b *strings.Builder, m domain.Message, threadProvider string) {
+func writeTurn(b *strings.Builder, m domain.Message, threadProvider string, toolOutput int) {
 	body := strings.TrimSpace(m.Content)
 	var label string
 	switch {
@@ -390,8 +432,17 @@ func writeTurn(b *strings.Builder, m domain.Message, threadProvider string) {
 		b.WriteString(" · " + m.Timestamp.Format("2006-01-02 15:04"))
 	}
 	b.WriteString("]\n")
-	b.WriteString(body)
-	b.WriteString("\n\n")
+	if body != "" {
+		b.WriteString(body)
+		b.WriteString("\n")
+	}
+	if len(m.Tools) > 0 {
+		if body != "" {
+			b.WriteString("\n")
+		}
+		domain.WriteTools(b, m.Tools, blockToolInput, toolOutput)
+	}
+	b.WriteString("\n")
 }
 
 // renderTranscript lays the older part of the thread out for the summarizer,
@@ -424,8 +475,12 @@ func renderTranscript(t domain.Thread, split int, catchUp bool) string {
 			fmt.Fprintf(&b, " · %s", m.Timestamp.Format("2006-01-02 15:04"))
 		}
 		b.WriteString("]\n")
-		b.WriteString(strings.TrimSpace(m.Content))
-		b.WriteString("\n\n")
+		if content := strings.TrimSpace(m.Content); content != "" {
+			b.WriteString(content)
+			b.WriteString("\n")
+		}
+		domain.WriteTools(&b, m.Tools, briefToolInput, briefToolOutput)
+		b.WriteString("\n")
 	}
 	b.WriteString("</transcript>")
 	return b.String()

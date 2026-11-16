@@ -207,3 +207,20 @@ func TestConversationWithDeletedSession(t *testing.T) {
 		}
 	}
 }
+
+func TestReaderShowsToolCallsOnOneLine(t *testing.T) {
+	out := renderThread(domain.Thread{Provider: "claude", Messages: []domain.Message{
+		{Role: domain.RoleAssistant, Tools: []domain.ToolCall{
+			{Name: "Bash", Input: "go test ./...\n  -run X", Output: "secret output"},
+			{Name: "Read", Input: "a.go", Error: true},
+		}},
+	}})
+	for _, want := range []string{"Assistant:", "▸ Bash  go test ./...", "▸ Read  a.go  (failed)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("reader missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "secret output") || strings.Contains(out, "-run X") {
+		t.Errorf("reader shows more than one line per call:\n%s", out)
+	}
+}

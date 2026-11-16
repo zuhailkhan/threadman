@@ -99,6 +99,20 @@ func (_u *MessageUpdate) SetNillableHandoffID(v *string) *MessageUpdate {
 	return _u
 }
 
+// SetTools sets the "tools" field.
+func (_u *MessageUpdate) SetTools(v string) *MessageUpdate {
+	_u.mutation.SetTools(v)
+	return _u
+}
+
+// SetNillableTools sets the "tools" field if the given value is not nil.
+func (_u *MessageUpdate) SetNillableTools(v *string) *MessageUpdate {
+	if v != nil {
+		_u.SetTools(*v)
+	}
+	return _u
+}
+
 // SetThreadID sets the "thread" edge to the Thread entity by ID.
 func (_u *MessageUpdate) SetThreadID(id string) *MessageUpdate {
 	_u.mutation.SetThreadID(id)
@@ -179,6 +193,9 @@ func (_u *MessageUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.HandoffID(); ok {
 		_spec.SetField(message.FieldHandoffID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Tools(); ok {
+		_spec.SetField(message.FieldTools, field.TypeString, value)
 	}
 	if _u.mutation.ThreadCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -299,6 +316,20 @@ func (_u *MessageUpdateOne) SetNillableHandoffID(v *string) *MessageUpdateOne {
 	return _u
 }
 
+// SetTools sets the "tools" field.
+func (_u *MessageUpdateOne) SetTools(v string) *MessageUpdateOne {
+	_u.mutation.SetTools(v)
+	return _u
+}
+
+// SetNillableTools sets the "tools" field if the given value is not nil.
+func (_u *MessageUpdateOne) SetNillableTools(v *string) *MessageUpdateOne {
+	if v != nil {
+		_u.SetTools(*v)
+	}
+	return _u
+}
+
 // SetThreadID sets the "thread" edge to the Thread entity by ID.
 func (_u *MessageUpdateOne) SetThreadID(id string) *MessageUpdateOne {
 	_u.mutation.SetThreadID(id)
@@ -409,6 +440,9 @@ func (_u *MessageUpdateOne) sqlSave(ctx context.Context) (_node *Message, err er
 	}
 	if value, ok := _u.mutation.HandoffID(); ok {
 		_spec.SetField(message.FieldHandoffID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Tools(); ok {
+		_spec.SetField(message.FieldTools, field.TypeString, value)
 	}
 	if _u.mutation.ThreadCleared() {
 		edge := &sqlgraph.EdgeSpec{

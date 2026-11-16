@@ -215,3 +215,34 @@ func TestOpenCodeWriterDeleteThreadNotFound(t *testing.T) {
 		t.Errorf("expected nil error for missing session (delete is idempotent), got: %v", err)
 	}
 }
+
+// OpenCode 1.x keeps tool calls as parts of type "tool".
+func TestGetThreadDetailsV1CapturesToolCalls(t *testing.T) {
+	dbPath, db := setupTestDB(t)
+	defer db.Close()
+	_, err := db.Exec(`
+		INSERT INTO session (id, project_id, slug, title, directory, time_created, time_updated) VALUES ('ses_1', 'global', 's', 'T', '/ws', 1, 1);
+		INSERT INTO message (id, session_id, data, time_created, time_updated) VALUES
+			('m1', 'ses_1', '{"role":"user"}', 1, 1),
+			('m2', 'ses_1', '{"role":"assistant"}', 2, 2);
+		INSERT INTO part (id, message_id, session_id, data, time_created, time_updated) VALUES
+			('p1', 'm1', 'ses_1', '{"type":"text","text":"run it"}', 1, 1),
+			('p2', 'm2', 'ses_1', '{"type":"tool","callID":"c1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"a.go"}}', 2, 2),
+			('p3', 'm2', 'ses_1', '{"type":"tool","callID":"c2","tool":"read","state":{"status":"error","input":{"filePath":"x"},"error":"not found"}}', 3, 3);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := (&Provider{dbPath: dbPath}).GetThreadDetails(context.Background(), domain.Thread{OriginalID: "ses_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Messages) != 2 {
+		t.Fatalf("got %d messages, want 2", len(full.Messages))
+	}
+	tools := full.Messages[1].Tools
+	if len(tools) != 2 || tools[0] != (domain.ToolCall{Name: "bash", Input: "ls", Output: "a.go"}) || !tools[1].Error || tools[1].Output != "not found" {
+		t.Errorf("tools = %+v", tools)
+	}
+}

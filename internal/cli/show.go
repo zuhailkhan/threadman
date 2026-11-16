@@ -89,7 +89,14 @@ func writeMessage(buf *bytes.Buffer, m domain.Message) {
 	default:
 		fmt.Fprintf(buf, "%s:\n", m.Role)
 	}
-	fmt.Fprintln(buf, m.Content)
+	if m.Content != "" {
+		fmt.Fprintln(buf, m.Content)
+	}
+	if len(m.Tools) > 0 {
+		var tools strings.Builder
+		domain.WriteTools(&tools, m.Tools, domain.MaxToolInput, domain.MaxToolOutput)
+		buf.WriteString(tools.String())
+	}
 	fmt.Fprintln(buf, strings.Repeat("─", 60))
 }
 

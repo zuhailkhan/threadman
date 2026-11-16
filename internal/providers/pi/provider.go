@@ -56,13 +56,18 @@ type entry struct {
 }
 
 type message struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content"`
+	ToolCallID string          `json:"toolCallId"`
+	IsError    bool            `json:"isError"`
 }
 
 type contentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
 func (p *Provider) DiscoverThreads(ctx context.Context) ([]domain.Thread, error) {
@@ -214,6 +219,10 @@ func (p *Provider) parse(path string, withMessages bool) (domain.Thread, error) 
 	createdAt := parseTime(header.Timestamp)
 	lastAt := createdAt
 	var messages []domain.Message
+	// Where each tool call is, so the toolResult message that answers it
+	// can be attached to it.
+	type toolRef struct{ msg, tool int }
+	tools := map[string]toolRef{}
 	firstUser := ""
 	for _, e := range chain {
 		if ts := parseTime(e.Timestamp); ts.After(lastAt) {
@@ -226,24 +235,40 @@ func (p *Provider) parse(path string, withMessages bool) (domain.Thread, error) 
 		if err := json.Unmarshal(e.Message, &m); err != nil {
 			continue
 		}
-		role, text := domain.Role(""), ""
+		var (
+			role  domain.Role
+			text  string
+			calls []domain.ToolCall
+			ids   []string
+		)
 		switch m.Role {
 		case "user":
 			role, text = domain.RoleUser, extractText(m.Content)
 		case "assistant":
 			role, text = domain.RoleAssistant, extractText(m.Content)
+			calls, ids = toolCalls(m.Content)
+		case "toolResult":
+			if ref, ok := tools[m.ToolCallID]; ok && withMessages {
+				call := &messages[ref.msg].Tools[ref.tool]
+				call.Output = domain.Shorten(extractText(m.Content), domain.MaxToolOutput)
+				call.Error = m.IsError
+			}
+			continue
 		default:
 			continue
 		}
-		if text == "" {
+		if text == "" && len(calls) == 0 {
 			continue
 		}
 		if role == domain.RoleUser && firstUser == "" {
 			firstUser = text
 		}
 		if withMessages {
+			for i := range calls {
+				tools[ids[i]] = toolRef{msg: len(messages), tool: i}
+			}
 			messages = append(messages, domain.Message{
-				ID: e.ID, Role: role, Content: text, Timestamp: parseTime(e.Timestamp),
+				ID: e.ID, Role: role, Content: text, Timestamp: parseTime(e.Timestamp), Tools: calls,
 			})
 		}
 	}
@@ -284,6 +309,23 @@ func extractText(raw json.RawMessage) string {
 		}
 	}
 	return sb.String()
+}
+
+// toolCalls returns the toolCall blocks of an assistant message and their IDs.
+func toolCalls(raw json.RawMessage) ([]domain.ToolCall, []string) {
+	var blocks []contentBlock
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return nil, nil
+	}
+	var calls []domain.ToolCall
+	var ids []string
+	for _, b := range blocks {
+		if b.Type == "toolCall" {
+			calls = append(calls, domain.ToolCall{Name: b.Name, Input: domain.ToolInput(b.Arguments)})
+			ids = append(ids, b.ID)
+		}
+	}
+	return calls, ids
 }
 
 func parseTime(s string) time.Time {

@@ -70,6 +70,20 @@ func (_c *MessageCreate) SetNillableHandoffID(v *string) *MessageCreate {
 	return _c
 }
 
+// SetTools sets the "tools" field.
+func (_c *MessageCreate) SetTools(v string) *MessageCreate {
+	_c.mutation.SetTools(v)
+	return _c
+}
+
+// SetNillableTools sets the "tools" field if the given value is not nil.
+func (_c *MessageCreate) SetNillableTools(v *string) *MessageCreate {
+	if v != nil {
+		_c.SetTools(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *MessageCreate) SetID(v string) *MessageCreate {
 	_c.mutation.SetID(v)
@@ -138,6 +152,10 @@ func (_c *MessageCreate) defaults() {
 		v := message.DefaultHandoffID
 		_c.mutation.SetHandoffID(v)
 	}
+	if _, ok := _c.mutation.Tools(); !ok {
+		v := message.DefaultTools
+		_c.mutation.SetTools(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -156,6 +174,9 @@ func (_c *MessageCreate) check() error {
 	}
 	if _, ok := _c.mutation.HandoffID(); !ok {
 		return &ValidationError{Name: "handoff_id", err: errors.New(`ent: missing required field "Message.handoff_id"`)}
+	}
+	if _, ok := _c.mutation.Tools(); !ok {
+		return &ValidationError{Name: "tools", err: errors.New(`ent: missing required field "Message.tools"`)}
 	}
 	return nil
 }
@@ -212,6 +233,10 @@ func (_c *MessageCreate) createSpec() (*Message, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.HandoffID(); ok {
 		_spec.SetField(message.FieldHandoffID, field.TypeString, value)
 		_node.HandoffID = value
+	}
+	if value, ok := _c.mutation.Tools(); ok {
+		_spec.SetField(message.FieldTools, field.TypeString, value)
+		_node.Tools = value
 	}
 	if nodes := _c.mutation.ThreadIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -342,6 +367,18 @@ func (u *MessageUpsert) UpdateHandoffID() *MessageUpsert {
 	return u
 }
 
+// SetTools sets the "tools" field.
+func (u *MessageUpsert) SetTools(v string) *MessageUpsert {
+	u.Set(message.FieldTools, v)
+	return u
+}
+
+// UpdateTools sets the "tools" field to the value that was provided on create.
+func (u *MessageUpsert) UpdateTools() *MessageUpsert {
+	u.SetExcluded(message.FieldTools)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create except the ID field.
 // Using this option is equivalent to using:
 //
@@ -457,6 +494,20 @@ func (u *MessageUpsertOne) SetHandoffID(v string) *MessageUpsertOne {
 func (u *MessageUpsertOne) UpdateHandoffID() *MessageUpsertOne {
 	return u.Update(func(s *MessageUpsert) {
 		s.UpdateHandoffID()
+	})
+}
+
+// SetTools sets the "tools" field.
+func (u *MessageUpsertOne) SetTools(v string) *MessageUpsertOne {
+	return u.Update(func(s *MessageUpsert) {
+		s.SetTools(v)
+	})
+}
+
+// UpdateTools sets the "tools" field to the value that was provided on create.
+func (u *MessageUpsertOne) UpdateTools() *MessageUpsertOne {
+	return u.Update(func(s *MessageUpsert) {
+		s.UpdateTools()
 	})
 }
 
@@ -742,6 +793,20 @@ func (u *MessageUpsertBulk) SetHandoffID(v string) *MessageUpsertBulk {
 func (u *MessageUpsertBulk) UpdateHandoffID() *MessageUpsertBulk {
 	return u.Update(func(s *MessageUpsert) {
 		s.UpdateHandoffID()
+	})
+}
+
+// SetTools sets the "tools" field.
+func (u *MessageUpsertBulk) SetTools(v string) *MessageUpsertBulk {
+	return u.Update(func(s *MessageUpsert) {
+		s.SetTools(v)
+	})
+}
+
+// UpdateTools sets the "tools" field to the value that was provided on create.
+func (u *MessageUpsertBulk) UpdateTools() *MessageUpsertBulk {
+	return u.Update(func(s *MessageUpsert) {
+		s.UpdateTools()
 	})
 }
 

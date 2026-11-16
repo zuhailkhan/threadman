@@ -22,6 +22,8 @@ const (
 	FieldKind = "kind"
 	// FieldHandoffID holds the string denoting the handoff_id field in the database.
 	FieldHandoffID = "handoff_id"
+	// FieldTools holds the string denoting the tools field in the database.
+	FieldTools = "tools"
 	// EdgeThread holds the string denoting the thread edge name in mutations.
 	EdgeThread = "thread"
 	// Table holds the table name of the message in the database.
@@ -43,6 +45,7 @@ var Columns = []string{
 	FieldTimestamp,
 	FieldKind,
 	FieldHandoffID,
+	FieldTools,
 }
 
 // ForeignKeys holds the SQL foreign-keys that are owned by the "messages"
@@ -71,6 +74,8 @@ var (
 	DefaultKind string
 	// DefaultHandoffID holds the default value on creation for the "handoff_id" field.
 	DefaultHandoffID string
+	// DefaultTools holds the default value on creation for the "tools" field.
+	DefaultTools string
 )
 
 // OrderOption defines the ordering options for the Message queries.
@@ -104,6 +109,11 @@ func ByKind(opts ...sql.OrderTermOption) OrderOption {
 // ByHandoffID orders the results by the handoff_id field.
 func ByHandoffID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldHandoffID, opts...).ToFunc()
+}
+
+// ByTools orders the results by the tools field.
+func ByTools(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTools, opts...).ToFunc()
 }
 
 // ByThreadField orders the results by thread field.

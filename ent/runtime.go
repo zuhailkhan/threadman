@@ -33,6 +33,10 @@ func init() {
 	messageDescHandoffID := messageFields[5].Descriptor()
 	// message.DefaultHandoffID holds the default value on creation for the handoff_id field.
 	message.DefaultHandoffID = messageDescHandoffID.Default.(string)
+	// messageDescTools is the schema descriptor for tools field.
+	messageDescTools := messageFields[6].Descriptor()
+	// message.DefaultTools holds the default value on creation for the tools field.
+	message.DefaultTools = messageDescTools.Default.(string)
 	threadFields := schema.Thread{}.Fields()
 	_ = threadFields
 	// threadDescCanonicalID is the schema descriptor for canonical_id field.

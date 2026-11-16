@@ -21,6 +21,9 @@ type Message struct {
 	// HandoffID links a KindHandoff message to its Handoff record.
 	HandoffID string `json:"handoff_id,omitempty"`
 
+	// Tools are the tool calls an assistant made in this turn.
+	Tools []ToolCall `json:"tools,omitempty"`
+
 	// Provider names the tool the message was written in, when it differs
 	// from its thread's: set on a conversation gathered from several tools.
 	// It is not stored.

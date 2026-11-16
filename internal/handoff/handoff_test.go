@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -72,7 +73,7 @@ func buildChecked(t *testing.T, c *fakeLLM, src domain.Thread, mode Mode) (strin
 	}
 
 	for i := range before {
-		if src.Messages[i] != before[i] {
+		if !reflect.DeepEqual(src.Messages[i], before[i]) {
 			t.Fatal("source thread was modified")
 		}
 	}
@@ -306,4 +307,76 @@ func TestBuildCatchUpSummary(t *testing.T) {
 	}
 	assertContains(t, out.Messages[0].Content, "· detailed summary · 10 new messages]", "first 4 of the 10 new messages")
 	assertContains(t, llm.user, "already knows this conversation up to the start of the transcript")
+}
+
+func toolThread() domain.Thread {
+	src := sampleThread(4)
+	src.Messages[1].Tools = []domain.ToolCall{
+		{Name: "Bash", Input: "go test ./...", Output: "ok  example.com/p\n" + strings.Repeat("z", 2000)},
+		{Name: "Read", Input: `{"file_path":"a.go"}`, Output: "no such file", Error: true},
+	}
+	src.Messages[3].Content = ""
+	src.Messages[3].Tools = []domain.ToolCall{{Name: "Glob", Input: `{"pattern":"*.go"}`, Output: "a.go"}}
+	return src
+}
+
+func TestBuildCarriesToolCalls(t *testing.T) {
+	block, _ := buildChecked(t, nil, toolThread(), ModeFull)
+
+	assertOrder(t, block,
+		"[Assistant · Claude Code · 2026-11-16 10:02]\nassistant 2\n\n→ Bash: go test ./...\n    ok  example.com/p\n",
+		"→ Read (failed): {\"file_path\":\"a.go\"}\n    no such file\n",
+		// A turn that was only a tool call keeps its label and its call.
+		"[Assistant · Claude Code · 2026-11-16 10:04]\n→ Glob: {\"pattern\":\"*.go\"}\n    a.go\n",
+	)
+	// Each result is cut to the block's budget, not the stored one.
+	if !strings.Contains(block, fmt.Sprintf("… (%d more characters)", len("ok  example.com/p\n")+2000-blockToolOutput)) {
+		t.Errorf("long output was not cut to %d characters:\n%s", blockToolOutput, block)
+	}
+}
+
+func TestSummarizerSeesToolCalls(t *testing.T) {
+	src := toolThread()
+	src.Messages = append(src.Messages, sampleThread(10).Messages[4:]...)
+	llm := &fakeLLM{reply: "brief"}
+	if _, _, err := Build(context.Background(), llm, "", src, ModeDetailed, testNow); err != nil {
+		t.Fatal(err)
+	}
+	assertContains(t, llm.user, "→ Bash: go test ./...", "→ Read (failed)")
+	if strings.Count(llm.user, "z") > briefToolOutput {
+		t.Errorf("the summarizer was sent more than %d characters of output", briefToolOutput)
+	}
+}
+
+// A conversation whose tool output would make the block too large keeps every
+// call but less of each result, and says so.
+func TestBuildShrinksToolOutputToFit(t *testing.T) {
+	src := sampleThread(2)
+	out := strings.Repeat("o", 1000)
+	for i := 0; i < 1000; i++ {
+		src.Messages[1].Tools = append(src.Messages[1].Tools, domain.ToolCall{Name: "Bash", Input: fmt.Sprintf("step %d", i), Output: out})
+	}
+
+	block, _ := buildChecked(t, nil, src, ModeFull)
+
+	if len(block) > maxBlockBytes {
+		t.Errorf("block is %d bytes, over the %d budget", len(block), maxBlockBytes)
+	}
+	if !strings.Contains(block, "→ Bash: step 0\n") || !strings.Contains(block, "→ Bash: step 999") {
+		t.Error("calls were dropped instead of their output")
+	}
+	if !strings.Contains(block, "cut to 200 characters to keep this message small") {
+		t.Errorf("the block does not say its output was cut:\n%.600s", block)
+	}
+}
+
+func TestBuildLeavesOutputOutWhenNothingElseFits(t *testing.T) {
+	src := sampleThread(2)
+	for i := 0; i < 4000; i++ {
+		src.Messages[1].Tools = append(src.Messages[1].Tools, domain.ToolCall{Name: "Bash", Input: fmt.Sprintf("step %d", i), Output: strings.Repeat("o", 500)})
+	}
+	block, _ := buildChecked(t, nil, src, ModeFull)
+	if !strings.Contains(block, "Their output is left out") || strings.Contains(block, "    ooo") {
+		t.Errorf("output should be left out entirely:\n%.600s", block)
+	}
 }

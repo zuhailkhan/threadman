@@ -45,7 +45,23 @@ type userMessageV2 struct {
 }
 
 type assistantMessageV2 struct {
+	Content []readBlockV2 `json:"content"`
+}
+
+// readBlockV2 is an assistant content block as stored: text, reasoning, or a
+// tool call with its state.
+type readBlockV2 struct {
+	Type  string      `json:"type"`
+	Text  string      `json:"text"`
+	Name  string      `json:"name"`
+	State toolStateV2 `json:"state"`
+}
+
+type toolStateV2 struct {
+	Status  string           `json:"status"`
+	Input   json.RawMessage  `json:"input"`
 	Content []contentBlockV2 `json:"content"`
+	Error   json.RawMessage  `json:"error"`
 }
 
 type contentBlockV2 struct {
@@ -77,8 +93,8 @@ func (p *Provider) threadDetailsV2(ctx context.Context, db *sql.DB, t domain.Thr
 			continue
 		}
 
-		role, content := parseMessageV2(msgType, data)
-		if content == "" {
+		role, content, tools := parseMessageV2(msgType, data)
+		if content == "" && len(tools) == 0 {
 			continue
 		}
 		messages = append(messages, domain.Message{
@@ -86,6 +102,7 @@ func (p *Provider) threadDetailsV2(ctx context.Context, db *sql.DB, t domain.Thr
 			Role:      role,
 			Content:   content,
 			Timestamp: time.UnixMilli(timeCreatedMs),
+			Tools:     tools,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -100,26 +117,61 @@ func (p *Provider) threadDetailsV2(ctx context.Context, db *sql.DB, t domain.Thr
 	return t, nil
 }
 
-func parseMessageV2(msgType, data string) (domain.Role, string) {
+func parseMessageV2(msgType, data string) (domain.Role, string, []domain.ToolCall) {
 	if msgType == "user" {
 		var m userMessageV2
 		if err := json.Unmarshal([]byte(data), &m); err != nil {
-			return domain.RoleUser, ""
+			return domain.RoleUser, "", nil
 		}
-		return domain.RoleUser, m.Text
+		return domain.RoleUser, m.Text, nil
 	}
 
 	var m assistantMessageV2
 	if err := json.Unmarshal([]byte(data), &m); err != nil {
-		return domain.RoleAssistant, ""
+		return domain.RoleAssistant, "", nil
 	}
 	var sb strings.Builder
+	var tools []domain.ToolCall
 	for _, block := range m.Content {
-		if block.Type == "text" {
+		switch block.Type {
+		case "text":
 			sb.WriteString(block.Text)
+		case "tool":
+			var out []string
+			for _, c := range block.State.Content {
+				if c.Text != "" {
+					out = append(out, c.Text)
+				}
+			}
+			output := strings.Join(out, "\n")
+			if output == "" && len(block.State.Error) > 0 && string(block.State.Error) != "null" {
+				output = errorText(block.State.Error)
+			}
+			tools = append(tools, domain.ToolCall{
+				Name:   block.Name,
+				Input:  domain.ToolInput(block.State.Input),
+				Output: domain.Shorten(output, domain.MaxToolOutput),
+				Error:  block.State.Status == "error",
+			})
 		}
 	}
-	return domain.RoleAssistant, sb.String()
+	return domain.RoleAssistant, sb.String(), tools
+}
+
+// errorText reads an error stored either as a string or as an object with a
+// message.
+func errorText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var e struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &e) == nil && e.Message != "" {
+		return e.Message
+	}
+	return string(raw)
 }
 
 func titleFromMessage(content string) string {

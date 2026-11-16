@@ -788,3 +788,32 @@ func TestSearchMessages_SkipsDeletedThreads(t *testing.T) {
 		t.Errorf("search found a deleted thread: %+v", threads)
 	}
 }
+
+func TestUpsertThread_StoresToolCalls(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	th := baseThread("claude-abc", "claude", "abc")
+	tools := []domain.ToolCall{{Name: "Bash", Input: "go test ./...", Output: "ok", Error: false}, {Name: "Read", Input: "a.go", Error: true}}
+	th.Messages = []domain.Message{
+		{ID: "a1", Role: domain.RoleAssistant, Content: "", Tools: tools, Timestamp: time.Unix(1000, 0)},
+		{ID: "u1", Role: domain.RoleUser, Content: "thanks", Timestamp: time.Unix(1001, 0)},
+	}
+	if err := repo.UpsertThread(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+
+	got := threadsByID(t, repo, "claude")["claude-abc"]
+	for _, m := range got.Messages {
+		switch m.Content {
+		case "":
+			if len(m.Tools) != 2 || m.Tools[0] != tools[0] || m.Tools[1] != tools[1] {
+				t.Errorf("tools = %+v", m.Tools)
+			}
+		case "thanks":
+			if m.Tools != nil {
+				t.Errorf("a message without tools got %+v", m.Tools)
+			}
+		}
+	}
+}
