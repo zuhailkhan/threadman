@@ -90,7 +90,7 @@ Let me check.
     internal/sync/service.go:88:3: undefined: pruneStale
 ```
 
-Each output is cut to 800 characters. If a block would still be larger than about 300 KB (around 75k tokens), outputs are cut to 200 characters and then left out, keeping every call, and the block says so. A conversation too long even then is better handed off as a summary. The summarizer sees each call with a short output, so briefs can say what was actually run.
+Each output is cut to 800 characters. If a block would still be larger than about 300 KB (around 75k tokens), outputs are cut to 200 characters and then left out, keeping every call, and the block says so. A conversation too long even then is better handed off as a summary: the mode dialog shows the full transcript's estimated size in tokens and recommends a summary when it is over that limit. The summarizer sees each call with a short output, so briefs can say what was actually run.
 
 Every handoff is recorded in threadman's database with the exact text sent. When the new session is synced, threadman recognises its block: the thread reader shows it as a divider, search skips it, and it doesn't become the session's title.
 

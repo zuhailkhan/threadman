@@ -377,6 +377,19 @@ const (
 	briefToolOutput = 200
 )
 
+// FullSize is how many bytes a full-transcript handoff of t would write, after
+// tool output has been cut to fit where it can be. fits is false when the
+// block is still over the size blocks aim for, so a summary should be
+// preferred. catchUp is as for PrepareCatchUp. No LLM is involved.
+func FullSize(t domain.Thread, catchUp bool) (size int, fits bool) {
+	out, _, err := build(context.Background(), nil, "", t, ModeFull, time.Now(), catchUp)
+	if err != nil || len(out.Messages) == 0 {
+		return 0, true
+	}
+	size = len(out.Messages[0].Content)
+	return size, size <= maxBlockBytes
+}
+
 // toolOutputBudgets are the per-call output limits tried, largest first.
 var toolOutputBudgets = []int{blockToolOutput, 200, 0}
 

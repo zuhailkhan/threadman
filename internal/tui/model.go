@@ -101,19 +101,23 @@ type Model struct {
 	handoffWorkspace    string
 	handoffAppended     bool
 	handoffCount        int
-	handoffModeCursor   int
-	handoffMode         handoff.Mode
-	handoffCancel       context.CancelFunc
-	summarizer          *handoff.Summarizer
-	llmStatus           handoff.Status
-	llmChecking         bool
-	llmSetup            llmSetupForm
-	resumeCursor        int
-	showArchived        bool
-	renameDraft         string
-	deleteTargets       []domain.Thread
-	deleteSelected      []bool
-	deleteDraft         string
+	// handoffFullSize is the size of the full-transcript block for the chosen
+	// target, and handoffFullFits whether it is within the block budget.
+	handoffFullSize   int
+	handoffFullFits   bool
+	handoffModeCursor int
+	handoffMode       handoff.Mode
+	handoffCancel     context.CancelFunc
+	summarizer        *handoff.Summarizer
+	llmStatus         handoff.Status
+	llmChecking       bool
+	llmSetup          llmSetupForm
+	resumeCursor      int
+	showArchived      bool
+	renameDraft       string
+	deleteTargets     []domain.Thread
+	deleteSelected    []bool
+	deleteDraft       string
 }
 
 type ThreadGroup struct {
@@ -723,6 +727,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.handoffChoice = m.handoffTargets[m.handoffCursor]
 			m.handoffTarget = m.handoffChoice.writer
+			// Sized now so the dialog can say whether the full transcript
+			// fits; composing a block needs no LLM.
+			m.handoffFullSize, m.handoffFullFits = handoff.FullSize(
+				handoffSource(m.thread, m.handoffChoice), m.handoffChoice.session != nil)
 			m.state = stateHandoffMode
 			// Re-check so an LLM server started (or configured) since launch
 			// is picked up.
@@ -1129,13 +1137,27 @@ func (m Model) viewHandoffMode() string {
 	}
 	inner.WriteString("\n")
 	for i, mode := range handoff.Modes {
+		size := ""
+		if mode == handoff.ModeFull && m.handoffFullSize > 0 {
+			size = styleHint.Render("  " + tokenEstimate(m.handoffFullSize))
+		}
 		switch {
 		case !m.modeUsable(mode):
-			inner.WriteString(styleHint.Render("  "+mode.Label()) + "\n")
+			inner.WriteString(styleHint.Render("  "+mode.Label()) + size + "\n")
 		case i == m.handoffModeCursor:
-			inner.WriteString(styleCursor.Render("▶") + " " + mode.Label() + "\n")
+			inner.WriteString(styleCursor.Render("▶") + " " + mode.Label() + size + "\n")
 		default:
-			inner.WriteString("  " + mode.Label() + "\n")
+			inner.WriteString("  " + mode.Label() + size + "\n")
+		}
+	}
+	if m.handoffFullSize > 0 && !m.handoffFullFits {
+		// Without an LLM, the lines below already say how to set one up.
+		warning := lipgloss.NewStyle().Width(dialogWidth - 4).Render(
+			fmt.Sprintf("The full transcript is %s, more than many models accept in one message. A summary is recommended.",
+				tokenEstimate(m.handoffFullSize)))
+		inner.WriteString("\n")
+		for _, line := range strings.Split(warning, "\n") {
+			inner.WriteString(styleWarn.Render("  "+line) + "\n")
 		}
 	}
 	inner.WriteString("\n")

@@ -380,3 +380,21 @@ func TestBuildLeavesOutputOutWhenNothingElseFits(t *testing.T) {
 		t.Errorf("output should be left out entirely:\n%.600s", block)
 	}
 }
+
+func TestFullSize(t *testing.T) {
+	small := sampleThread(4)
+	size, fits := FullSize(small, false)
+	out, _, err := Build(context.Background(), nil, "", small, ModeFull, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fits || size != len(out.Messages[0].Content) {
+		t.Errorf("FullSize = %d, %v; the block is %d bytes", size, fits, len(out.Messages[0].Content))
+	}
+
+	big := sampleThread(2)
+	big.Messages[0].Content = strings.Repeat("words ", maxBlockBytes/5)
+	if size, fits := FullSize(big, false); fits || size <= maxBlockBytes {
+		t.Errorf("FullSize = %d, %v for a conversation over the budget", size, fits)
+	}
+}

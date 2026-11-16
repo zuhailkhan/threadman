@@ -224,3 +224,64 @@ func TestReaderShowsToolCallsOnOneLine(t *testing.T) {
 		t.Errorf("reader shows more than one line per call:\n%s", out)
 	}
 }
+
+func modeDialog(t *testing.T, messages []domain.Message, llmReady bool) Model {
+	t.Helper()
+	thread := domain.Thread{ID: "claude-abc", Provider: "claude", Messages: messages}
+	m := Model{
+		state:        stateThread,
+		width:        120,
+		height:       40,
+		thread:       thread,
+		groupThreads: []domain.Thread{thread},
+		writers:      []ports.ThreadWriter{&fakeWriter{name: "claude"}, &fakeWriter{name: "pi"}},
+		summarizer:   handoff.NewSummarizer(filepath.Join(t.TempDir(), "config.json")),
+	}
+	m, _ = press(t, m, "h")
+	m, _ = press(t, m, "enter")
+	if m.state != stateHandoffMode {
+		t.Fatalf("state %v, want the mode dialog", m.state)
+	}
+	// Stand in for the LLM check finishing.
+	m.llmChecking = false
+	if llmReady {
+		m.llmStatus = handoff.Status{Configured: true, Label: "Ollama · llama3.2"}
+	}
+	m.handoffModeCursor = m.firstUsableMode()
+	return m
+}
+
+func TestModeDialogShowsFullTranscriptSize(t *testing.T) {
+	m := modeDialog(t, []domain.Message{{Role: domain.RoleUser, Content: strings.Repeat("a", 4000)}}, false)
+	view := m.View()
+	if !strings.Contains(view, "Full transcript") || !strings.Contains(view, "~1k tokens") {
+		t.Errorf("dialog does not show the size:\n%s", view)
+	}
+	if strings.Contains(view, "more than many") {
+		t.Errorf("a small transcript got the size warning:\n%s", view)
+	}
+}
+
+func TestModeDialogRecommendsSummaryForLargeTranscript(t *testing.T) {
+	large := []domain.Message{{Role: domain.RoleUser, Content: strings.Repeat("words ", 80_000)}}
+
+	m := modeDialog(t, large, false)
+	view := m.View()
+	for _, want := range []string{"Full transcript  ~120k tokens", "~120k tokens, more than many", "A summary is", "press L to set one up"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("without an LLM, dialog missing %q:\n%s", want, view)
+		}
+	}
+	if handoff.Modes[m.handoffModeCursor] != handoff.ModeFull {
+		t.Error("without an LLM the full transcript is the only choice")
+	}
+
+	m = modeDialog(t, large, true)
+	view = m.View()
+	if !strings.Contains(view, "~120k tokens, more than many") || strings.Contains(view, "press L") {
+		t.Errorf("with an LLM ready:\n%s", view)
+	}
+	if handoff.Modes[m.handoffModeCursor] != handoff.ModeDetailed {
+		t.Errorf("cursor on %v, want the detailed summary", handoff.Modes[m.handoffModeCursor])
+	}
+}

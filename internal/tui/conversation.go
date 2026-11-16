@@ -147,6 +147,28 @@ func containsThread(threads []domain.Thread, id string) bool {
 	return false
 }
 
+// handoffSource is what a handoff to target carries: the open conversation's
+// metadata with the messages the target missed, run in the target session's
+// workspace when it has one.
+func handoffSource(root domain.Thread, target handoffTarget) domain.Thread {
+	src := root
+	src.Messages = conversation.Messages(target.missed)
+	if target.session != nil {
+		src.WorkspacePath = target.session.WorkspacePath
+	}
+	return src
+}
+
+// tokenEstimate turns a size in bytes into a rough token count for display,
+// at about four bytes a token.
+func tokenEstimate(bytes int) string {
+	tokens := bytes / 4
+	if tokens < 1000 {
+		return fmt.Sprintf("~%d tokens", tokens)
+	}
+	return fmt.Sprintf("~%dk tokens", (tokens+500)/1000)
+}
+
 // writeHandoff hands the open conversation to the chosen tool: appended to
 // the session it already has there, or written as a new session. The
 // conversation's sessions are only read.
@@ -162,12 +184,10 @@ func (m Model) writeHandoff(ctx context.Context, target handoffTarget, mode hand
 		defer cancel()
 
 		w := target.writer
-		src := root
-		src.Messages = conversation.Messages(target.missed)
+		src := handoffSource(root, target)
 
 		if target.session != nil {
 			session := *target.session
-			src.WorkspacePath = session.WorkspacePath
 			out, record, err := s.PrepareCatchUp(ctx, src, mode)
 			if err != nil {
 				return handoffErrMsg{err}
