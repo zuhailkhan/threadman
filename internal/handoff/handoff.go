@@ -1,6 +1,10 @@
-// Package handoff prepares the copy of a thread that gets written into
-// another provider: either the full transcript or a summary of it. The source
-// thread is never modified.
+// Package handoff prepares what gets written into another provider when a
+// thread is handed off: one attributed block holding either the full
+// transcript or a summary of it. The source thread is never modified.
+//
+// The block is a single user message. Replaying another model's turns as the
+// receiving model's own would make it treat them as things it said; in a
+// labelled block it reads them as an account from another tool.
 package handoff
 
 import (
@@ -9,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/llm"
 )
@@ -32,6 +37,18 @@ func (m Mode) Label() string {
 		return "Light summary"
 	default:
 		return "Full transcript"
+	}
+}
+
+// Name is the mode's stored identifier.
+func (m Mode) Name() string {
+	switch m {
+	case ModeDetailed:
+		return "detailed"
+	case ModeLight:
+		return "light"
+	default:
+		return "full"
 	}
 }
 
@@ -165,62 +182,158 @@ func (s *Summarizer) Check(ctx context.Context) Status {
 	return st
 }
 
-// Prepare returns the thread to write into the target provider. For ModeFull
-// that is the thread itself; for the summary modes it is a copy whose
-// messages are replaced by a summary.
-func (s *Summarizer) Prepare(ctx context.Context, t domain.Thread, mode Mode) (domain.Thread, error) {
+// Prepare builds the handoff of t in the given mode: the thread to write into
+// the target provider, holding a single handoff block, and the record of it.
+// The record's target is filled in once the session has been written.
+func (s *Summarizer) Prepare(ctx context.Context, t domain.Thread, mode Mode) (domain.Thread, domain.Handoff, error) {
 	if !mode.NeedsLLM() {
-		return t, nil
+		return Build(ctx, nil, "", t, mode, time.Now())
 	}
-	c, _, ok, err := s.client()
+	c, cfg, ok, err := s.client()
 	if err != nil {
-		return domain.Thread{}, err
+		return domain.Thread{}, domain.Handoff{}, err
 	}
 	if !ok {
-		return domain.Thread{}, fmt.Errorf("no LLM configured; run 'threadman llm set'")
+		return domain.Thread{}, domain.Handoff{}, fmt.Errorf("no LLM configured; run 'threadman llm set'")
 	}
-	return Summarize(ctx, c, t, mode)
+	return Build(ctx, c, cfg.Label(), t, mode, time.Now())
 }
 
-// Summarize returns a copy of t in which the older messages are replaced by a
-// summary written by c and the newest few are kept word for word. A thread
-// too short to have older messages is returned as it is, without calling c.
-func Summarize(ctx context.Context, c llm.Client, t domain.Thread, mode Mode) (domain.Thread, error) {
-	split := splitRecent(t.Messages, mode.keepRecent())
-	if split == 0 {
-		return t, nil
+// Build composes the handoff of t. In the summary modes the older messages are
+// replaced by a brief written by c, named summarizer in the record, and the
+// newest few are kept word for word; c is not used for ModeFull. A thread too
+// short to have older messages is handed over in full, without calling c.
+func Build(ctx context.Context, c llm.Client, summarizer string, t domain.Thread, mode Mode, now time.Time) (domain.Thread, domain.Handoff, error) {
+	split := 0
+	summary := ""
+	if mode.NeedsLLM() {
+		split = splitRecent(t.Messages, mode.keepRecent())
+		if split == 0 {
+			mode = ModeFull
+		}
+	}
+	if mode.NeedsLLM() {
+		system := detailedPrompt
+		if mode == ModeLight {
+			system = lightPrompt
+		}
+		var err error
+		summary, err = c.Complete(ctx, system, renderTranscript(t, split))
+		if err != nil {
+			return domain.Thread{}, domain.Handoff{}, err
+		}
+	} else {
+		summarizer = ""
 	}
 
-	system := detailedPrompt
-	if mode == ModeLight {
-		system = lightPrompt
+	h := domain.Handoff{
+		ID:                 uuid.New().String(),
+		SourceThreadID:     t.ID,
+		Mode:               mode.Name(),
+		Summarizer:         summarizer,
+		SourceMessageCount: len(t.Messages),
+		CreatedAt:          now,
 	}
+	if n := len(t.Messages); n > 0 {
+		h.SourceLastMessageID = t.Messages[n-1].ID
+	}
+	h.Content = composeBlock(h.ID, t, mode, split, summary, summarizer)
 
-	summary, err := c.Complete(ctx, system, renderTranscript(t, split))
-	if err != nil {
-		return domain.Thread{}, err
-	}
-
-	// The brief and its acknowledgement are dated just before the kept
-	// messages so the session stays in time order.
-	at := t.Messages[split].Timestamp
-	if at.IsZero() {
-		at = time.Now()
-	}
 	out := t
-	out.Messages = make([]domain.Message, 0, 2+len(t.Messages)-split)
-	out.Messages = append(out.Messages,
-		domain.Message{Role: domain.RoleUser, Content: briefMessage(t, mode, split, summary), Timestamp: at},
-		domain.Message{Role: domain.RoleAssistant, Content: "I've read the handoff brief. The most recent messages of the original conversation follow.", Timestamp: at},
-	)
-	out.Messages = append(out.Messages, t.Messages[split:]...)
-	return out, nil
+	out.Messages = []domain.Message{{
+		ID:        h.ID,
+		Role:      domain.RoleUser,
+		Content:   h.Content,
+		Timestamp: now,
+		Kind:      domain.KindHandoff,
+		HandoffID: h.ID,
+	}}
+	return out, h, nil
 }
 
-// renderTranscript lays the thread out for the model, numbering turns so the
-// brief can keep them in order. Only the messages before split are included:
-// the rest are handed over word for word, and a model that can see them tends
-// to repeat them in the brief.
+// composeBlock writes the handoff block: a marker line threadman recognises on
+// sync, a note on where the content came from, then the brief and the
+// messages handed over word for word.
+func composeBlock(id string, t domain.Thread, mode Mode, split int, summary, summarizer string) string {
+	source := domain.ProviderLabel(t.Provider)
+	total := len(t.Messages)
+
+	var b strings.Builder
+	b.WriteString(domain.HandoffMarker(id, fmt.Sprintf("from %s · %s · %s", source, strings.ToLower(mode.Label()), plural(total, "message"))))
+	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "threadman wrote this message, not the user. It carries over a conversation that took place in %s so you can continue it here. ", source)
+	b.WriteString("You wrote none of it: the assistant turns below came from another model, so treat what they say as an account to check against the code, not as your own earlier statements.\n\n")
+	if mode.NeedsLLM() {
+		model := "a language model"
+		if summarizer != "" {
+			model += " (" + summarizer + ")"
+		}
+		fmt.Fprintf(&b, "The brief covers the first %d of the conversation's %d messages and was written by %s; it can be incomplete or wrong. ", split, total, model)
+		fmt.Fprintf(&b, "The last %s follow it word for word, and where the two disagree, the messages are right.\n\n", plural(total-split, "message"))
+	}
+	if t.ID != "" {
+		fmt.Fprintf(&b, "To read the original conversation in full, run: threadman show %s\n\n", t.ID)
+	}
+
+	if mode.NeedsLLM() {
+		b.WriteString("## Brief\n\n")
+		b.WriteString(strings.TrimSpace(summary))
+		b.WriteString("\n\n")
+		fmt.Fprintf(&b, "## Last %s\n\n", plural(total-split, "message"))
+	} else {
+		b.WriteString("## Conversation\n\n")
+	}
+	for _, m := range t.Messages[split:] {
+		writeTurn(&b, m, source)
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// writeTurn writes one message under a label naming who wrote it.
+func writeTurn(b *strings.Builder, m domain.Message, source string) {
+	body := strings.TrimSpace(m.Content)
+	var label string
+	switch {
+	case m.Kind == domain.KindHandoff:
+		// A block this thread itself received earlier: keep its content but
+		// not its marker, which belongs to that earlier handoff.
+		_, detail, _ := domain.ParseHandoffMarker(body)
+		label = "Handoff received"
+		if detail != "" {
+			label += " · " + detail
+		}
+		if _, rest, ok := strings.Cut(body, "\n"); ok {
+			body = strings.TrimSpace(rest)
+		} else {
+			body = ""
+		}
+	case m.Role == domain.RoleUser:
+		label = "User"
+	case m.Role == domain.RoleAssistant:
+		label = "Assistant · " + source
+	default:
+		label = string(m.Role)
+	}
+	b.WriteString("[" + label)
+	if !m.Timestamp.IsZero() {
+		b.WriteString(" · " + m.Timestamp.Format("2006-01-02 15:04"))
+	}
+	b.WriteString("]\n")
+	b.WriteString(body)
+	b.WriteString("\n\n")
+}
+
+// renderTranscript lays the older part of the thread out for the summarizer,
+// numbering turns so the brief can keep them in order. Only the messages
+// before split are included: the rest are handed over word for word, and a
+// model that can see them tends to repeat them in the brief.
 func renderTranscript(t domain.Thread, split int) string {
 	var b strings.Builder
 	title := t.CustomTitle
@@ -235,7 +348,11 @@ func renderTranscript(t domain.Thread, split int) string {
 	}
 	b.WriteString("\n<transcript>\n")
 	for i, m := range t.Messages[:split] {
-		fmt.Fprintf(&b, "[turn %d · %s", i+1, m.Role)
+		role := string(m.Role)
+		if m.Kind == domain.KindHandoff {
+			role = "handoff received from another tool"
+		}
+		fmt.Fprintf(&b, "[turn %d · %s", i+1, role)
 		if !m.Timestamp.IsZero() {
 			fmt.Fprintf(&b, " · %s", m.Timestamp.Format("2006-01-02 15:04"))
 		}
@@ -244,21 +361,5 @@ func renderTranscript(t domain.Thread, split int) string {
 		b.WriteString("\n\n")
 	}
 	b.WriteString("</transcript>")
-	return b.String()
-}
-
-// briefMessage wraps the summary in the opening message of the new session.
-func briefMessage(t domain.Thread, mode Mode, split int, summary string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "This session continues a conversation handed off from %s by threadman. ", t.Provider)
-	fmt.Fprintf(&b, "Below is a %s of the first %d of its %d messages, written by a language model; it can be incomplete or wrong. ",
-		strings.ToLower(mode.Label()), split, len(t.Messages))
-	fmt.Fprintf(&b, "The last %d messages follow this brief word for word; where they disagree with it, they are right.\n\n", len(t.Messages)-split)
-	if t.ID != "" {
-		fmt.Fprintf(&b, "The original conversation is unchanged. To read it in full, run: threadman show %s\n\n", t.ID)
-	}
-	b.WriteString("---\n\n")
-	b.WriteString(strings.TrimSpace(summary))
-	b.WriteString("\n")
 	return b.String()
 }

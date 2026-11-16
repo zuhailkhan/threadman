@@ -80,6 +80,16 @@ func Timestamp(v time.Time) predicate.Message {
 	return predicate.Message(sql.FieldEQ(FieldTimestamp, v))
 }
 
+// Kind applies equality check predicate on the "kind" field. It's identical to KindEQ.
+func Kind(v string) predicate.Message {
+	return predicate.Message(sql.FieldEQ(FieldKind, v))
+}
+
+// HandoffID applies equality check predicate on the "handoff_id" field. It's identical to HandoffIDEQ.
+func HandoffID(v string) predicate.Message {
+	return predicate.Message(sql.FieldEQ(FieldHandoffID, v))
+}
+
 // RoleEQ applies the EQ predicate on the "role" field.
 func RoleEQ(v string) predicate.Message {
 	return predicate.Message(sql.FieldEQ(FieldRole, v))
@@ -248,6 +258,136 @@ func TimestampLT(v time.Time) predicate.Message {
 // TimestampLTE applies the LTE predicate on the "timestamp" field.
 func TimestampLTE(v time.Time) predicate.Message {
 	return predicate.Message(sql.FieldLTE(FieldTimestamp, v))
+}
+
+// KindEQ applies the EQ predicate on the "kind" field.
+func KindEQ(v string) predicate.Message {
+	return predicate.Message(sql.FieldEQ(FieldKind, v))
+}
+
+// KindNEQ applies the NEQ predicate on the "kind" field.
+func KindNEQ(v string) predicate.Message {
+	return predicate.Message(sql.FieldNEQ(FieldKind, v))
+}
+
+// KindIn applies the In predicate on the "kind" field.
+func KindIn(vs ...string) predicate.Message {
+	return predicate.Message(sql.FieldIn(FieldKind, vs...))
+}
+
+// KindNotIn applies the NotIn predicate on the "kind" field.
+func KindNotIn(vs ...string) predicate.Message {
+	return predicate.Message(sql.FieldNotIn(FieldKind, vs...))
+}
+
+// KindGT applies the GT predicate on the "kind" field.
+func KindGT(v string) predicate.Message {
+	return predicate.Message(sql.FieldGT(FieldKind, v))
+}
+
+// KindGTE applies the GTE predicate on the "kind" field.
+func KindGTE(v string) predicate.Message {
+	return predicate.Message(sql.FieldGTE(FieldKind, v))
+}
+
+// KindLT applies the LT predicate on the "kind" field.
+func KindLT(v string) predicate.Message {
+	return predicate.Message(sql.FieldLT(FieldKind, v))
+}
+
+// KindLTE applies the LTE predicate on the "kind" field.
+func KindLTE(v string) predicate.Message {
+	return predicate.Message(sql.FieldLTE(FieldKind, v))
+}
+
+// KindContains applies the Contains predicate on the "kind" field.
+func KindContains(v string) predicate.Message {
+	return predicate.Message(sql.FieldContains(FieldKind, v))
+}
+
+// KindHasPrefix applies the HasPrefix predicate on the "kind" field.
+func KindHasPrefix(v string) predicate.Message {
+	return predicate.Message(sql.FieldHasPrefix(FieldKind, v))
+}
+
+// KindHasSuffix applies the HasSuffix predicate on the "kind" field.
+func KindHasSuffix(v string) predicate.Message {
+	return predicate.Message(sql.FieldHasSuffix(FieldKind, v))
+}
+
+// KindEqualFold applies the EqualFold predicate on the "kind" field.
+func KindEqualFold(v string) predicate.Message {
+	return predicate.Message(sql.FieldEqualFold(FieldKind, v))
+}
+
+// KindContainsFold applies the ContainsFold predicate on the "kind" field.
+func KindContainsFold(v string) predicate.Message {
+	return predicate.Message(sql.FieldContainsFold(FieldKind, v))
+}
+
+// HandoffIDEQ applies the EQ predicate on the "handoff_id" field.
+func HandoffIDEQ(v string) predicate.Message {
+	return predicate.Message(sql.FieldEQ(FieldHandoffID, v))
+}
+
+// HandoffIDNEQ applies the NEQ predicate on the "handoff_id" field.
+func HandoffIDNEQ(v string) predicate.Message {
+	return predicate.Message(sql.FieldNEQ(FieldHandoffID, v))
+}
+
+// HandoffIDIn applies the In predicate on the "handoff_id" field.
+func HandoffIDIn(vs ...string) predicate.Message {
+	return predicate.Message(sql.FieldIn(FieldHandoffID, vs...))
+}
+
+// HandoffIDNotIn applies the NotIn predicate on the "handoff_id" field.
+func HandoffIDNotIn(vs ...string) predicate.Message {
+	return predicate.Message(sql.FieldNotIn(FieldHandoffID, vs...))
+}
+
+// HandoffIDGT applies the GT predicate on the "handoff_id" field.
+func HandoffIDGT(v string) predicate.Message {
+	return predicate.Message(sql.FieldGT(FieldHandoffID, v))
+}
+
+// HandoffIDGTE applies the GTE predicate on the "handoff_id" field.
+func HandoffIDGTE(v string) predicate.Message {
+	return predicate.Message(sql.FieldGTE(FieldHandoffID, v))
+}
+
+// HandoffIDLT applies the LT predicate on the "handoff_id" field.
+func HandoffIDLT(v string) predicate.Message {
+	return predicate.Message(sql.FieldLT(FieldHandoffID, v))
+}
+
+// HandoffIDLTE applies the LTE predicate on the "handoff_id" field.
+func HandoffIDLTE(v string) predicate.Message {
+	return predicate.Message(sql.FieldLTE(FieldHandoffID, v))
+}
+
+// HandoffIDContains applies the Contains predicate on the "handoff_id" field.
+func HandoffIDContains(v string) predicate.Message {
+	return predicate.Message(sql.FieldContains(FieldHandoffID, v))
+}
+
+// HandoffIDHasPrefix applies the HasPrefix predicate on the "handoff_id" field.
+func HandoffIDHasPrefix(v string) predicate.Message {
+	return predicate.Message(sql.FieldHasPrefix(FieldHandoffID, v))
+}
+
+// HandoffIDHasSuffix applies the HasSuffix predicate on the "handoff_id" field.
+func HandoffIDHasSuffix(v string) predicate.Message {
+	return predicate.Message(sql.FieldHasSuffix(FieldHandoffID, v))
+}
+
+// HandoffIDEqualFold applies the EqualFold predicate on the "handoff_id" field.
+func HandoffIDEqualFold(v string) predicate.Message {
+	return predicate.Message(sql.FieldEqualFold(FieldHandoffID, v))
+}
+
+// HandoffIDContainsFold applies the ContainsFold predicate on the "handoff_id" field.
+func HandoffIDContainsFold(v string) predicate.Message {
+	return predicate.Message(sql.FieldContainsFold(FieldHandoffID, v))
 }
 
 // HasThread applies the HasEdge predicate on the "thread" edge.

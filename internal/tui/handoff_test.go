@@ -107,13 +107,45 @@ func TestHandoffModeDialogWithoutLLM(t *testing.T) {
 	if m.state != stateHandoffWorking {
 		t.Fatalf("state after choosing a mode = %v", m.state)
 	}
-	next, _ = m.Update(write())
+	written := write()
+	next, record := m.Update(written)
 	m = asModel(next)
 	if m.state != stateHandoffConfirm || m.handoffSessionID != "new-session" {
 		t.Fatalf("state after write = %v, session %q", m.state, m.handoffSessionID)
 	}
-	if len(target.written) != 1 || len(target.written[0].Messages) != 1 || target.written[0].Messages[0].Content != "hello" {
-		t.Fatalf("full transcript not written as-is: %+v", target.written)
+	if record == nil {
+		t.Error("the handoff was not recorded")
+	}
+
+	// The transcript goes over as one attributed block.
+	if len(target.written) != 1 || len(target.written[0].Messages) != 1 {
+		t.Fatalf("want one session holding one block, got %+v", target.written)
+	}
+	block := target.written[0].Messages[0]
+	if block.Kind != domain.KindHandoff || block.Role != domain.RoleUser || !strings.Contains(block.Content, "[User]\nhello") {
+		t.Fatalf("full transcript not written as a handoff block: %+v", block)
+	}
+
+	// The record names the session it was written to.
+	h := written.(handoffWrittenMsg).record
+	if h.ID != block.HandoffID || h.TargetProvider != "pi" || h.TargetOriginalID != "new-session" || h.Mode != "full" {
+		t.Errorf("record = %+v", h)
+	}
+}
+
+// A received handoff block shows as a divider, not as something the user typed.
+func TestRenderThreadShowsHandoffAsDivider(t *testing.T) {
+	block := domain.HandoffMarker("h-1", "from Claude Code · full transcript · 4 messages") + "\n\n[User]\nsecret detail"
+	out := renderThread(domain.Thread{Messages: []domain.Message{
+		{Role: domain.RoleUser, Content: block, Kind: domain.KindHandoff, HandoffID: "h-1"},
+		{Role: domain.RoleUser, Content: "now add tests"},
+	}})
+
+	if !strings.Contains(out, "handoff received · from Claude Code · full transcript · 4 messages") {
+		t.Errorf("divider missing:\n%s", out)
+	}
+	if strings.Contains(out, "secret detail") || strings.Count(out, "You:") != 1 {
+		t.Errorf("the block was rendered as a message:\n%s", out)
 	}
 }
 

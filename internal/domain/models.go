@@ -15,6 +15,11 @@ type Message struct {
 	Role      Role      `json:"role"`
 	Content   string    `json:"content"`
 	Timestamp time.Time `json:"timestamp"`
+
+	Kind MessageKind `json:"kind,omitempty"`
+
+	// HandoffID links a KindHandoff message to its Handoff record.
+	HandoffID string `json:"handoff_id,omitempty"`
 }
 
 type Thread struct {

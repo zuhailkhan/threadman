@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zuhailkhan/threadman/internal/domain"
+	"github.com/zuhailkhan/threadman/internal/llm"
 )
 
 type fakeLLM struct {
@@ -52,56 +53,120 @@ func sampleThread(n int) domain.Thread {
 	return t
 }
 
-func TestSummarizeKeepsRecentTurns(t *testing.T) {
-	src := sampleThread(10)
-	llm := &fakeLLM{reply: "  ## Goal\nfix tabs  "}
+var testNow = time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 
-	out, err := Summarize(context.Background(), llm, src, ModeDetailed)
+// build runs Build and checks the invariants every handoff shares: the
+// source is untouched, the output is one handoff block whose content is the
+// record's, and the marker names the record.
+func build(t *testing.T, c *fakeLLM, src domain.Thread, mode Mode) (string, domain.Handoff) {
+	t.Helper()
+	before := append([]domain.Message(nil), src.Messages...)
+
+	var client llm.Client
+	if c != nil {
+		client = c
+	}
+	out, h, err := Build(context.Background(), client, "Ollama · llama3.2", src, mode, testNow)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(src.Messages) != 10 || src.Messages[0].Content != "user 1" {
-		t.Fatal("source thread was modified")
+	for i := range before {
+		if src.Messages[i] != before[i] {
+			t.Fatal("source thread was modified")
+		}
 	}
 	if out.ID != src.ID || out.WorkspacePath != src.WorkspacePath || out.Title != src.Title {
 		t.Errorf("thread metadata not carried over: %+v", out)
 	}
+	if len(out.Messages) != 1 {
+		t.Fatalf("got %d messages, want one handoff block", len(out.Messages))
+	}
+	m := out.Messages[0]
+	if m.Role != domain.RoleUser || m.Kind != domain.KindHandoff || m.HandoffID != h.ID || m.Content != h.Content {
+		t.Errorf("block message = %+v, record %+v", m, h)
+	}
+	if id, _, ok := domain.ParseHandoffMarker(m.Content); !ok || id != h.ID {
+		t.Errorf("block does not start with its marker:\n%s", m.Content)
+	}
+	if h.SourceThreadID != src.ID || h.SourceMessageCount != len(src.Messages) || !h.CreatedAt.Equal(testNow) {
+		t.Errorf("record = %+v", h)
+	}
+	return m.Content, h
+}
 
-	// Detailed keeps the last 6: a brief, an acknowledgement, then turns 5-10.
-	if len(out.Messages) != 8 {
-		t.Fatalf("got %d messages, want 8: %+v", len(out.Messages), out.Messages)
-	}
-	if out.Messages[0].Role != domain.RoleUser || out.Messages[1].Role != domain.RoleAssistant {
-		t.Fatalf("want a user brief then an assistant acknowledgement, got %+v", out.Messages[:2])
-	}
-	for i, m := range out.Messages[2:] {
-		if m != src.Messages[4+i] {
-			t.Errorf("kept message %d = %+v, want %+v unchanged", i, m, src.Messages[4+i])
+func assertContains(t *testing.T, s string, wants ...string) {
+	t.Helper()
+	for _, w := range wants {
+		if !strings.Contains(s, w) {
+			t.Errorf("missing %q in:\n%s", w, s)
 		}
 	}
-	for i := 1; i < len(out.Messages); i++ {
-		if out.Messages[i].Role == out.Messages[i-1].Role {
-			t.Errorf("messages %d and %d have the same role", i-1, i)
-		}
-		if out.Messages[i].Timestamp.Before(out.Messages[i-1].Timestamp) {
-			t.Errorf("message %d is dated before message %d", i, i-1)
-		}
-	}
+}
 
-	brief := out.Messages[0].Content
-	for _, want := range []string{"## Goal\nfix tabs", "handed off from claude", "detailed summary", "first 4 of its 10 messages", "last 6 messages follow", "threadman show claude-abc"} {
-		if !strings.Contains(brief, want) {
-			t.Errorf("brief missing %q:\n%s", want, brief)
+func assertOrder(t *testing.T, s string, parts ...string) {
+	t.Helper()
+	at := 0
+	for _, p := range parts {
+		i := strings.Index(s[at:], p)
+		if i < 0 {
+			t.Errorf("%q missing or out of order in:\n%s", p, s)
+			return
 		}
+		at += i + len(p)
+	}
+}
+
+func TestBuildFullTranscript(t *testing.T) {
+	src := sampleThread(4)
+	src.Messages[3].ID = "m4"
+
+	block, h := build(t, nil, src, ModeFull)
+
+	if h.Mode != "full" || h.Summarizer != "" || h.SourceLastMessageID != "m4" {
+		t.Errorf("record = %+v", h)
+	}
+	assertContains(t, block,
+		"· from Claude Code · full transcript · 4 messages]",
+		"threadman wrote this message, not the user",
+		"You wrote none of it",
+		"threadman show claude-abc",
+	)
+	assertOrder(t, block,
+		"## Conversation",
+		"[User · 2026-11-16 10:01]\nuser 1",
+		"[Assistant · Claude Code · 2026-11-16 10:02]\nassistant 2",
+		"[User · 2026-11-16 10:03]\nuser 3",
+		"[Assistant · Claude Code · 2026-11-16 10:04]\nassistant 4",
+	)
+	if strings.Contains(block, "## Brief") {
+		t.Error("a full transcript has no brief")
+	}
+}
+
+func TestBuildDetailedSummary(t *testing.T) {
+	src := sampleThread(10)
+	llm := &fakeLLM{reply: "  ## Goal\nfix tabs  "}
+
+	block, h := build(t, llm, src, ModeDetailed)
+
+	if h.Mode != "detailed" || h.Summarizer != "Ollama · llama3.2" {
+		t.Errorf("record = %+v", h)
+	}
+	assertContains(t, block,
+		"· detailed summary · 10 messages]",
+		"first 4 of the conversation's 10 messages",
+		"written by a language model (Ollama · llama3.2)",
+		"The last 6 messages follow it word for word",
+	)
+	// The brief, then turns 5-10 word for word and nothing earlier.
+	assertOrder(t, block, "## Brief\n\n## Goal\nfix tabs\n", "## Last 6 messages", "user 5", "assistant 10")
+	if strings.Contains(block, "]\nuser 3") {
+		t.Error("summarized turns were also copied word for word")
 	}
 
 	// The model is sent only the older turns.
-	for _, want := range []string{"Working directory: /work/proj", "[turn 1 · user · 2026-11-16 10:01]", "assistant 4"} {
-		if !strings.Contains(llm.user, want) {
-			t.Errorf("transcript missing %q:\n%s", want, llm.user)
-		}
-	}
+	assertContains(t, llm.user, "Working directory: /work/proj", "[turn 1 · user · 2026-11-16 10:01]", "assistant 4")
 	if strings.Contains(llm.user, "user 5") || strings.Contains(llm.user, "assistant 10") {
 		t.Errorf("turns 5-10 are handed over as they are and must not be sent to the model:\n%s", llm.user)
 	}
@@ -110,56 +175,62 @@ func TestSummarizeKeepsRecentTurns(t *testing.T) {
 	}
 }
 
-func TestSummarizeLightKeepsFewer(t *testing.T) {
-	src := sampleThread(10)
+func TestBuildLightSummary(t *testing.T) {
 	llm := &fakeLLM{reply: "short"}
+	block, h := build(t, llm, sampleThread(10), ModeLight)
 
-	out, err := Summarize(context.Background(), llm, src, ModeLight)
-	if err != nil {
-		t.Fatal(err)
+	if llm.system != lightPrompt || h.Mode != "light" {
+		t.Errorf("light mode: prompt match %v, record %+v", llm.system == lightPrompt, h)
 	}
-	if llm.system != lightPrompt {
-		t.Error("light mode did not use the light prompt")
-	}
-	// Light keeps the last 2: brief, acknowledgement, turns 9-10.
-	if len(out.Messages) != 4 || out.Messages[2].Content != "user 9" || out.Messages[3].Content != "assistant 10" {
-		t.Fatalf("got %+v", out.Messages)
+	assertOrder(t, block, "## Brief\n\nshort", "## Last 2 messages", "user 9", "assistant 10")
+	if strings.Contains(block, "]\nassistant 8") {
+		t.Error("light mode kept more than the last 2 messages")
 	}
 }
 
 // The kept tail must start on a user message, so it is widened when the
 // plain cut would land on an assistant message.
-func TestSummarizeTailStartsOnUser(t *testing.T) {
+func TestBuildTailStartsOnUser(t *testing.T) {
 	src := sampleThread(9) // ends on a user message; last 6 would start on assistant 4
-	out, err := Summarize(context.Background(), &fakeLLM{reply: "s"}, src, ModeDetailed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Messages[2].Content != "user 3" || len(out.Messages) != 2+7 {
-		t.Fatalf("tail should start at user 3 and hold 7 messages, got %+v", out.Messages[2:])
-	}
+	block, _ := build(t, &fakeLLM{reply: "s"}, src, ModeDetailed)
+	assertContains(t, block, "first 2 of the conversation's 9 messages", "## Last 7 messages")
+	assertOrder(t, block, "## Last 7 messages", "]\nuser 3")
 }
 
-// A thread with nothing older than the kept tail is handed over whole.
-func TestSummarizeShortThread(t *testing.T) {
-	src := sampleThread(6)
+// A thread with nothing older than the kept tail is handed over whole, and
+// recorded as a full transcript.
+func TestBuildShortThreadSkipsLLM(t *testing.T) {
 	llm := &fakeLLM{reply: "unused"}
+	block, h := build(t, llm, sampleThread(6), ModeDetailed)
 
-	out, err := Summarize(context.Background(), llm, src, ModeDetailed)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if llm.calls != 0 {
 		t.Error("the LLM was called for a thread with nothing to summarize")
 	}
-	if len(out.Messages) != 6 || out.Messages[0] != src.Messages[0] {
-		t.Errorf("short thread should pass through unchanged, got %+v", out.Messages)
+	if h.Mode != "full" || h.Summarizer != "" {
+		t.Errorf("record = %+v, want a full transcript with no summarizer", h)
+	}
+	assertContains(t, block, "· full transcript · 6 messages]", "## Conversation", "user 1")
+}
+
+// A block the source itself received is carried as a labelled account, and
+// its marker does not survive, so it can't be mistaken for this handoff.
+func TestBuildCarriesEarlierHandoff(t *testing.T) {
+	src := sampleThread(2)
+	earlier := domain.HandoffMarker("old-id", "from OpenCode · full transcript · 3 messages") + "\n\nearlier body"
+	src.Messages = append([]domain.Message{{Role: domain.RoleUser, Content: earlier, Kind: domain.KindHandoff, HandoffID: "old-id"}}, src.Messages...)
+
+	block, _ := build(t, nil, src, ModeFull)
+
+	assertContains(t, block, "[Handoff received · from OpenCode · full transcript · 3 messages]\nearlier body")
+	if strings.Contains(block, "old-id") {
+		t.Errorf("the earlier marker was copied into the new block:\n%s", block)
 	}
 }
 
-func TestSummarizeError(t *testing.T) {
+func TestBuildError(t *testing.T) {
 	boom := errors.New("boom")
-	if _, err := Summarize(context.Background(), &fakeLLM{err: boom}, sampleThread(10), ModeLight); !errors.Is(err, boom) {
+	_, _, err := Build(context.Background(), &fakeLLM{err: boom}, "", sampleThread(10), ModeLight, testNow)
+	if !errors.Is(err, boom) {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -173,11 +244,11 @@ func TestSummarizerWithoutConfig(t *testing.T) {
 	}
 
 	src := sampleThread(10)
-	full, err := s.Prepare(context.Background(), src, ModeFull)
-	if err != nil || len(full.Messages) != 10 || full.Messages[0] != src.Messages[0] {
-		t.Errorf("full transcript should pass through without an LLM: %v", err)
+	out, h, err := s.Prepare(context.Background(), src, ModeFull)
+	if err != nil || h.Mode != "full" || len(out.Messages) != 1 {
+		t.Errorf("full transcript should work without an LLM: %v, %+v", err, h)
 	}
-	if _, err := s.Prepare(context.Background(), src, ModeDetailed); err == nil {
+	if _, _, err := s.Prepare(context.Background(), src, ModeDetailed); err == nil {
 		t.Error("summary without an LLM should fail")
 	}
 }

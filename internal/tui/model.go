@@ -56,6 +56,7 @@ type countMsg int
 type handoffWrittenMsg struct {
 	sessionID string
 	writer    ports.ThreadWriter
+	record    domain.Handoff
 }
 type handoffErrMsg struct{ err error }
 type handoffLinkErrMsg struct{ err error }
@@ -157,12 +158,7 @@ func providerIcons(g ThreadGroup) string {
 	return "[" + strings.Join(parts, " ") + "]"
 }
 
-var providerLabels = map[string]string{
-	"claude":   "Claude Code",
-	"gemini":   "Gemini CLI",
-	"opencode": "OpenCode",
-	"pi":       "pi",
-}
+var providerLabels = domain.ProviderLabels
 
 func New(svc *syncsvc.Service, dbPath string, writers []ports.ThreadWriter, summarizer *handoff.Summarizer) Model {
 	providers := make([]onboardingProvider, 0)
@@ -304,7 +300,7 @@ func (m Model) writeHandoff(ctx context.Context, w ports.ThreadWriter, mode hand
 		}
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		out, err := s.Prepare(ctx, t, mode)
+		out, record, err := s.Prepare(ctx, t, mode)
 		if err != nil {
 			return handoffErrMsg{err}
 		}
@@ -315,16 +311,18 @@ func (m Model) writeHandoff(ctx context.Context, w ports.ThreadWriter, mode hand
 		if err != nil {
 			return handoffErrMsg{err}
 		}
-		return handoffWrittenMsg{sessionID: id, writer: w}
+		record.TargetProvider = w.Name()
+		record.TargetOriginalID = id
+		return handoffWrittenMsg{sessionID: id, writer: w, record: record}
 	}
 }
 
-func (m Model) recordHandoffLink(targetProvider, targetOriginalID string) tea.Cmd {
+func (m Model) recordHandoffLink(record domain.Handoff) tea.Cmd {
 	source := m.thread
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := m.svc.RecordHandoff(ctx, source, targetProvider, targetOriginalID); err != nil {
+		if err := m.svc.RecordHandoff(ctx, source, record); err != nil {
 			return handoffLinkErrMsg{err}
 		}
 		return nil
@@ -515,7 +513,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handoffSessionID = msg.sessionID
 		m.status = ""
 		m.state = stateHandoffConfirm
-		return m, m.recordHandoffLink(msg.writer.Name(), msg.sessionID)
+		return m, m.recordHandoffLink(msg.record)
 
 	case handoffErrMsg:
 		m.handoffCancel = nil
@@ -1509,6 +1507,10 @@ func renderThread(t domain.Thread) string {
 	var b strings.Builder
 	sep := styleSep.Render(strings.Repeat("─", 80))
 	for _, m := range t.Messages {
+		if m.Kind == domain.KindHandoff {
+			b.WriteString(handoffDivider(m) + "\n")
+			continue
+		}
 		switch m.Role {
 		case domain.RoleUser:
 			b.WriteString(styleYou.Render("You:") + "\n")
@@ -1521,6 +1523,17 @@ func renderThread(t domain.Thread) string {
 		b.WriteString(sep + "\n")
 	}
 	return b.String()
+}
+
+// handoffDivider stands in for a handoff block threadman wrote into this
+// session. The block repeats a conversation already readable on its source
+// thread, so only its description is shown.
+func handoffDivider(m domain.Message) string {
+	label := "handoff received"
+	if _, detail, ok := domain.ParseHandoffMarker(m.Content); ok && detail != "" {
+		label += " · " + detail
+	}
+	return styleHint.Render("──── " + label + " ────")
 }
 
 func lastMessageDate(t domain.Thread) string {

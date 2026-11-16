@@ -16,6 +16,9 @@ func (Message) Fields() []ent.Field {
 		field.String("role"),
 		field.String("content"),
 		field.Time("timestamp"),
+		// "" for an ordinary message, "handoff" for a block threadman wrote.
+		field.String("kind").Default(""),
+		field.String("handoff_id").Default(""),
 	}
 }
 

@@ -3,6 +3,8 @@
 package ent
 
 import (
+	"github.com/zuhailkhan/threadman/ent/handoff"
+	"github.com/zuhailkhan/threadman/ent/message"
 	"github.com/zuhailkhan/threadman/ent/schema"
 	"github.com/zuhailkhan/threadman/ent/thread"
 )
@@ -11,6 +13,26 @@ import (
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
+	handoffFields := schema.Handoff{}.Fields()
+	_ = handoffFields
+	// handoffDescSummarizer is the schema descriptor for summarizer field.
+	handoffDescSummarizer := handoffFields[5].Descriptor()
+	// handoff.DefaultSummarizer holds the default value on creation for the summarizer field.
+	handoff.DefaultSummarizer = handoffDescSummarizer.Default.(string)
+	// handoffDescSourceLastMessageID is the schema descriptor for source_last_message_id field.
+	handoffDescSourceLastMessageID := handoffFields[7].Descriptor()
+	// handoff.DefaultSourceLastMessageID holds the default value on creation for the source_last_message_id field.
+	handoff.DefaultSourceLastMessageID = handoffDescSourceLastMessageID.Default.(string)
+	messageFields := schema.Message{}.Fields()
+	_ = messageFields
+	// messageDescKind is the schema descriptor for kind field.
+	messageDescKind := messageFields[4].Descriptor()
+	// message.DefaultKind holds the default value on creation for the kind field.
+	message.DefaultKind = messageDescKind.Default.(string)
+	// messageDescHandoffID is the schema descriptor for handoff_id field.
+	messageDescHandoffID := messageFields[5].Descriptor()
+	// message.DefaultHandoffID holds the default value on creation for the handoff_id field.
+	message.DefaultHandoffID = messageDescHandoffID.Default.(string)
 	threadFields := schema.Thread{}.Fields()
 	_ = threadFields
 	// threadDescCanonicalID is the schema descriptor for canonical_id field.

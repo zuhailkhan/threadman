@@ -32,7 +32,9 @@ type ThreadRepository interface {
 
 	DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error
 
-	RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error
+	RecordHandoff(ctx context.Context, source domain.Thread, h domain.Handoff) error
+
+	GetHandoff(ctx context.Context, id string) (domain.Handoff, error)
 
 	MarkThreadDeleted(ctx context.Context, id, hash string) error
 

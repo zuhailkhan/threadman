@@ -66,9 +66,13 @@ Pressing `h` in a thread asks for the target provider and then for a mode:
 |------|-------------------------------|
 | Detailed summary | A brief of the older messages (goal, current state, decisions in force and why, rejected approaches, open questions, next steps), then the last 6 messages word for word |
 | Light summary | A brief of the older messages in up to 200 words, then the last 2 messages word for word |
-| Full transcript | Every message, as before |
+| Full transcript | Every message |
 
-The original thread is never changed. A summary handoff writes a new session that opens with the brief, which tells the new agent how to read the original (`threadman show <thread-id>`), followed by the newest messages unchanged, since those carry the task in progress. The kept messages always start on one of yours, so a few more than 6 or 2 may be kept. A thread with nothing older than that is handed over whole. Summaries are written from message text only, because threadman does not store tool calls or command output.
+The original thread is never changed. Whatever the mode, the new session holds a single message from threadman: a handoff block that says where the conversation came from, how to read the original (`threadman show <thread-id>`), and then the brief and messages, each labelled with who wrote it. The other model's replies are not written as the new model's own turns, so it reads them as an account from another tool rather than as things it said.
+
+In the summary modes the newest messages are kept word for word after the brief, since those carry the task in progress. The kept messages always start on one of yours, so a few more than 6 or 2 may be kept. A thread with nothing older than that is handed over whole. Summaries are written from message text only, because threadman does not store tool calls or command output.
+
+Every handoff is recorded in threadman's database with the exact text sent. When the new session is synced, threadman recognises its block: the thread reader shows it as a divider, search skips it, and it doesn't become the session's title.
 
 The two summary modes need an LLM. Without one, or when it cannot be reached, only the full transcript is offered.
 

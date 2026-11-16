@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zuhailkhan/threadman/ent"
@@ -78,7 +79,12 @@ func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
 		Update(func(u *ent.ThreadUpsert) {
 			u.SetProvider(t.Provider)
 			u.SetOriginalID(t.OriginalID)
-			u.SetTitle(t.Title)
+			// An empty title never replaces a known one. Sync blanks the
+			// title of a handed-off session, whose provider would otherwise
+			// title it after the handoff block.
+			if t.Title != "" {
+				u.SetTitle(t.Title)
+			}
 			u.SetWorkspacePath(t.WorkspacePath)
 			u.SetSourceFilePath(t.SourceFilePath)
 			u.SetCreatedAt(t.CreatedAt)
@@ -118,6 +124,8 @@ func (r *Repository) UpsertThread(ctx context.Context, t domain.Thread) error {
 			SetRole(string(m.Role)).
 			SetContent(m.Content).
 			SetTimestamp(m.Timestamp).
+			SetKind(string(m.Kind)).
+			SetHandoffID(m.HandoffID).
 			SetThreadID(t.ID)
 	}
 
@@ -195,7 +203,12 @@ func (r *Repository) DeleteThreadsNotIn(ctx context.Context, provider string, id
 
 func (r *Repository) SearchMessages(ctx context.Context, query string) ([]domain.Thread, error) {
 	entities, err := r.client.Thread.Query().
-		Where(thread.HasMessagesWith(message.ContentContains(query))).
+		// Handoff blocks repeat messages stored on their source thread, so
+		// matching them would report the same text twice.
+		Where(thread.HasMessagesWith(
+			message.ContentContains(query),
+			message.KindNEQ(string(domain.KindHandoff)),
+		)).
 		WithMessages().
 		All(ctx)
 	if err != nil {
@@ -210,7 +223,32 @@ func (r *Repository) SearchMessages(ctx context.Context, query string) ([]domain
 	return threads, nil
 }
 
-func (r *Repository) RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error {
+// RecordHandoff stores h and links its target session into the source's
+// group. The target thread is created as an empty stub until its session is
+// synced; a target that is already stored keeps its messages.
+func (r *Repository) RecordHandoff(ctx context.Context, source domain.Thread, h domain.Handoff) error {
+	if h.ID == "" || h.TargetProvider == "" || h.TargetOriginalID == "" {
+		return fmt.Errorf("handoff record is missing its ID or target")
+	}
+	createdAt := h.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	if err := r.client.Handoff.Create().
+		SetID(h.ID).
+		SetSourceThreadID(source.ID).
+		SetTargetThreadID(h.TargetThreadID()).
+		SetTargetProvider(h.TargetProvider).
+		SetMode(h.Mode).
+		SetSummarizer(h.Summarizer).
+		SetSourceMessageCount(h.SourceMessageCount).
+		SetSourceLastMessageID(h.SourceLastMessageID).
+		SetContent(h.Content).
+		SetCreatedAt(createdAt).
+		Exec(ctx); err != nil {
+		return fmt.Errorf("save handoff: %w", err)
+	}
+
 	rootID := source.CanonicalID
 	if rootID == "" {
 		rootID = source.ID
@@ -222,10 +260,21 @@ func (r *Repository) RecordHandoff(ctx context.Context, source domain.Thread, ta
 		return fmt.Errorf("set source canonical_id: %w", err)
 	}
 
+	// A live hook can ingest the target session before this runs. Upserting
+	// a stub over it would delete the messages it already has.
+	targetID := h.TargetThreadID()
+	exists, err := r.client.Thread.Query().Where(thread.ID(targetID)).Exist(ctx)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return r.client.Thread.UpdateOneID(targetID).SetCanonicalID(rootID).Exec(ctx)
+	}
+
 	stub := domain.Thread{
-		ID:            targetProvider + "-" + targetOriginalID,
-		Provider:      targetProvider,
-		OriginalID:    targetOriginalID,
+		ID:            targetID,
+		Provider:      h.TargetProvider,
+		OriginalID:    h.TargetOriginalID,
 		CanonicalID:   rootID,
 		Title:         source.Title,
 		WorkspacePath: source.WorkspacePath,
@@ -233,6 +282,27 @@ func (r *Repository) RecordHandoff(ctx context.Context, source domain.Thread, ta
 		LastSyncedAt:  time.Now(),
 	}
 	return r.UpsertThread(ctx, stub)
+}
+
+// GetHandoff returns the stored record of one handoff.
+func (r *Repository) GetHandoff(ctx context.Context, id string) (domain.Handoff, error) {
+	e, err := r.client.Handoff.Get(ctx, id)
+	if err != nil {
+		return domain.Handoff{}, err
+	}
+	provider := e.TargetProvider
+	return domain.Handoff{
+		ID:                  e.ID,
+		SourceThreadID:      e.SourceThreadID,
+		TargetProvider:      provider,
+		TargetOriginalID:    strings.TrimPrefix(e.TargetThreadID, provider+"-"),
+		Mode:                e.Mode,
+		Summarizer:          e.Summarizer,
+		SourceMessageCount:  e.SourceMessageCount,
+		SourceLastMessageID: e.SourceLastMessageID,
+		Content:             e.Content,
+		CreatedAt:           e.CreatedAt,
+	}, nil
 }
 
 func (r *Repository) MarkThreadDeleted(ctx context.Context, id, hash string) error {
@@ -280,6 +350,8 @@ func mapEntThreadToDomain(e *ent.Thread) domain.Thread {
 			Role:      domain.Role(m.Role),
 			Content:   m.Content,
 			Timestamp: m.Timestamp,
+			Kind:      domain.MessageKind(m.Kind),
+			HandoffID: m.HandoffID,
 		}
 	}
 

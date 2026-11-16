@@ -71,10 +71,14 @@ func newShowCmd(svc *syncsvc.Service) *cobra.Command {
 }
 
 func writeMessage(buf *bytes.Buffer, m domain.Message) {
-	switch m.Role {
-	case domain.RoleUser:
+	switch {
+	case m.Kind == domain.KindHandoff:
+		// Printed in full: an agent reading this thread needs what the block
+		// told the model, not only that a handoff happened.
+		fmt.Fprintln(buf, "Handoff received (written by threadman):")
+	case m.Role == domain.RoleUser:
 		fmt.Fprintln(buf, "You:")
-	case domain.RoleAssistant:
+	case m.Role == domain.RoleAssistant:
 		fmt.Fprintln(buf, "Assistant:")
 	default:
 		fmt.Fprintf(buf, "%s:\n", m.Role)

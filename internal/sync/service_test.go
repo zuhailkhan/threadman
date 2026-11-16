@@ -85,3 +85,94 @@ func TestSyncAllReportsRealFailures(t *testing.T) {
 		t.Errorf("pruned %v after a failed read", repo.pruned)
 	}
 }
+
+// detailProvider discovers one thread and returns it with fixed details.
+type detailProvider struct {
+	thread domain.Thread
+}
+
+func (p detailProvider) Name() string { return p.thread.Provider }
+
+func (p detailProvider) DiscoverThreads(context.Context) ([]domain.Thread, error) {
+	return []domain.Thread{p.thread}, nil
+}
+
+func (p detailProvider) GetThreadDetails(_ context.Context, t domain.Thread) (domain.Thread, error) {
+	t.Messages = append([]domain.Message(nil), p.thread.Messages...)
+	t.Title = p.thread.Title
+	return t, nil
+}
+
+func (p detailProvider) IngestFromHook(ctx context.Context, _ ports.HookPayload) (domain.Thread, error) {
+	return p.GetThreadDetails(ctx, p.thread)
+}
+
+type upsertRecorder struct {
+	ports.ThreadRepository
+	saved []domain.Thread
+}
+
+func (r *upsertRecorder) UpsertThread(_ context.Context, t domain.Thread) error {
+	r.saved = append(r.saved, t)
+	return nil
+}
+
+func (r *upsertRecorder) DeleteThreadsNotIn(context.Context, string, []string) error { return nil }
+
+// handedOffThread is a pi session that threadman created by handing a
+// conversation off, and that the user then continued.
+func handedOffThread() domain.Thread {
+	block := domain.HandoffMarker("h-1", "from Claude Code · full transcript · 4 messages") + "\n\nbody"
+	return domain.Thread{
+		ID:       "pi-sess-1",
+		Provider: "pi",
+		// pi titles a session after its first user message: the block.
+		Title: "[threadman handoff h-1 · from Claude Code · f...",
+		Messages: []domain.Message{
+			{ID: "b", Role: domain.RoleUser, Content: block},
+			{ID: "u", Role: domain.RoleUser, Content: "now add tests"},
+			{ID: "a", Role: domain.RoleAssistant, Content: "[threadman handoff h-2] is not a marker in an assistant turn"},
+		},
+	}
+}
+
+func assertHandoffsMarked(t *testing.T, th domain.Thread) {
+	t.Helper()
+	if th.Title != "" {
+		t.Errorf("title %q should be dropped so the stored one is kept", th.Title)
+	}
+	want := []struct {
+		kind domain.MessageKind
+		id   string
+	}{{domain.KindHandoff, "h-1"}, {domain.KindMessage, ""}, {domain.KindMessage, ""}}
+	for i, w := range want {
+		if m := th.Messages[i]; m.Kind != w.kind || m.HandoffID != w.id {
+			t.Errorf("message %d: kind %q, handoff_id %q; want %q, %q", i, m.Kind, m.HandoffID, w.kind, w.id)
+		}
+	}
+}
+
+func TestSyncAllMarksHandoffBlocks(t *testing.T) {
+	repo := &upsertRecorder{}
+	svc := New([]ports.ThreadProvider{detailProvider{thread: handedOffThread()}}, repo)
+
+	svc.SyncAll(context.Background())
+
+	if len(repo.saved) != 1 {
+		t.Fatalf("saved %d threads, want 1", len(repo.saved))
+	}
+	assertHandoffsMarked(t, repo.saved[0])
+}
+
+func TestIngestFromHookMarksHandoffBlocks(t *testing.T) {
+	repo := &upsertRecorder{}
+	svc := New([]ports.ThreadProvider{detailProvider{thread: handedOffThread()}}, repo)
+
+	if err := svc.IngestFromHook(context.Background(), "pi", ports.HookPayload{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.saved) != 1 {
+		t.Fatalf("saved %d threads, want 1", len(repo.saved))
+	}
+	assertHandoffsMarked(t, repo.saved[0])
+}

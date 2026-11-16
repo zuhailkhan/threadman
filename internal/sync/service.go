@@ -56,6 +56,7 @@ func (s *Service) SyncAll(ctx context.Context) []SyncResult {
 				result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", t.OriginalID, err))
 				continue
 			}
+			markHandoffs(&full)
 			if !hasUserMessage(full.Messages) {
 				result.Skipped++
 				continue
@@ -97,6 +98,25 @@ func (s *Service) SyncProvider(ctx context.Context, name string) (SyncResult, bo
 	return SyncResult{}, false
 }
 
+// markHandoffs finds the blocks threadman wrote into a session and files them
+// as handoffs instead of messages the user typed. A provider titles a session
+// after its first user message, which in a handed-off session is the block, so
+// that title is dropped and the stored one is kept.
+func markHandoffs(t *domain.Thread) {
+	for i, m := range t.Messages {
+		if m.Role != domain.RoleUser {
+			continue
+		}
+		if id, _, ok := domain.ParseHandoffMarker(m.Content); ok {
+			t.Messages[i].Kind = domain.KindHandoff
+			t.Messages[i].HandoffID = id
+		}
+	}
+	if domain.IsHandoffMarker(t.Title) {
+		t.Title = ""
+	}
+}
+
 func hasUserMessage(messages []domain.Message) bool {
 	for _, m := range messages {
 		if m.Role == domain.RoleUser {
@@ -119,7 +139,15 @@ func (s *Service) GetThread(ctx context.Context, id string) (domain.Thread, erro
 		if t.ID == id {
 			for _, p := range s.providers {
 				if p.Name() == t.Provider {
-					return p.GetThreadDetails(ctx, t)
+					full, err := p.GetThreadDetails(ctx, t)
+					if err != nil {
+						return full, err
+					}
+					markHandoffs(&full)
+					if full.Title == "" {
+						full.Title = t.Title
+					}
+					return full, nil
 				}
 			}
 			return t, nil
@@ -140,8 +168,12 @@ func (s *Service) ProviderNames() []string {
 	return names
 }
 
-func (s *Service) RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error {
-	return s.repo.RecordHandoff(ctx, source, targetProvider, targetOriginalID)
+func (s *Service) RecordHandoff(ctx context.Context, source domain.Thread, h domain.Handoff) error {
+	return s.repo.RecordHandoff(ctx, source, h)
+}
+
+func (s *Service) GetHandoff(ctx context.Context, id string) (domain.Handoff, error) {
+	return s.repo.GetHandoff(ctx, id)
 }
 
 func (s *Service) CountThreads(ctx context.Context) (int, error) {
@@ -161,6 +193,7 @@ func (s *Service) IngestFromHook(ctx context.Context, providerName string, paylo
 		if err != nil {
 			return err
 		}
+		markHandoffs(&thread)
 		if !hasUserMessage(thread.Messages) {
 			return nil
 		}
