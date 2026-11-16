@@ -7,6 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zuhailkhan/threadman/internal/cli"
+	"github.com/zuhailkhan/threadman/internal/handoff"
+	"github.com/zuhailkhan/threadman/internal/llm"
 	"github.com/zuhailkhan/threadman/internal/ports"
 	"github.com/zuhailkhan/threadman/internal/providers/claude"
 	"github.com/zuhailkhan/threadman/internal/providers/opencode"
@@ -47,8 +49,14 @@ func main() {
 		pi.NewWriter(),
 	}
 
-	if err := cli.Execute(svc, func() {
-		m := tui.New(svc, filepath.Join(dbDir, "threads.db"), writers)
+	cfgPath, err := llm.DefaultPath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := cli.Execute(svc, cfgPath, func() {
+		m := tui.New(svc, filepath.Join(dbDir, "threads.db"), writers, handoff.NewSummarizer(cfgPath))
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)

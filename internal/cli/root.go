@@ -5,7 +5,7 @@ import (
 	syncsvc "github.com/zuhailkhan/threadman/internal/sync"
 )
 
-func Execute(svc *syncsvc.Service, launchTUI func()) error {
+func Execute(svc *syncsvc.Service, cfgPath string, launchTUI func()) error {
 	root := &cobra.Command{
 		Use:     "threadman",
 		Short:   "Aggregate AI conversation threads",
@@ -14,6 +14,6 @@ func Execute(svc *syncsvc.Service, launchTUI func()) error {
 			launchTUI()
 		},
 	}
-	root.AddCommand(newSyncCmd(svc), newListCmd(svc), newSearchCmd(svc), newShowCmd(svc), newIngestCmd(svc), newSetupHooksCmd())
+	root.AddCommand(newSyncCmd(svc), newListCmd(svc), newSearchCmd(svc), newShowCmd(svc), newIngestCmd(svc), newSetupHooksCmd(), newLLMCmd(cfgPath))
 	return root.Execute()
 }
