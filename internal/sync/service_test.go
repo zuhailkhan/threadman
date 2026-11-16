@@ -11,14 +11,15 @@ import (
 )
 
 type stubProvider struct {
-	name string
-	err  error
+	name    string
+	err     error
+	threads []domain.Thread
 }
 
 func (p stubProvider) Name() string { return p.name }
 
 func (p stubProvider) DiscoverThreads(context.Context) ([]domain.Thread, error) {
-	return nil, p.err
+	return p.threads, p.err
 }
 
 func (p stubProvider) GetThreadDetails(_ context.Context, t domain.Thread) (domain.Thread, error) {
@@ -39,7 +40,8 @@ func TestSyncAllSkipsUnavailableSourceWithoutPruning(t *testing.T) {
 	repo := &pruneRecorder{}
 	svc := New([]ports.ThreadProvider{
 		stubProvider{name: "missing", err: fmt.Errorf("%w: /nowhere", ports.ErrSourceUnavailable)},
-		stubProvider{name: "present"},
+		// No user message, so the thread is discovered but never upserted.
+		stubProvider{name: "present", threads: []domain.Thread{{ID: "present-1"}}},
 	}, repo)
 
 	results := svc.SyncAll(context.Background())
@@ -52,6 +54,20 @@ func TestSyncAllSkipsUnavailableSourceWithoutPruning(t *testing.T) {
 	}
 	if len(repo.pruned) != 1 || repo.pruned[0] != "present" {
 		t.Errorf("pruned %v, want only [present]", repo.pruned)
+	}
+}
+
+func TestSyncAllDoesNotPruneOnEmptyDiscovery(t *testing.T) {
+	repo := &pruneRecorder{}
+	svc := New([]ports.ThreadProvider{stubProvider{name: "empty"}}, repo)
+
+	r := svc.SyncAll(context.Background())[0]
+
+	if r.Err != nil || r.Unavailable || len(r.Errors) != 0 {
+		t.Errorf("got %+v, want a clean result", r)
+	}
+	if len(repo.pruned) != 0 {
+		t.Errorf("pruned %v after discovering no threads", repo.pruned)
 	}
 }
 

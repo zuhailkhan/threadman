@@ -404,3 +404,128 @@ func TestDeleteThreadsNotIn_PreservesTombstones(t *testing.T) {
 		t.Errorf("expected tombstone to prevent re-import, got %d threads", len(threads))
 	}
 }
+
+func threadWithMessages(id, provider, originalID string) domain.Thread {
+	th := baseThread(id, provider, originalID)
+	th.Messages = []domain.Message{
+		{ID: "m1", Role: domain.RoleUser, Content: "hello", Timestamp: time.Unix(1000, 0)},
+		{ID: "m2", Role: domain.RoleAssistant, Content: "hi", Timestamp: time.Unix(1001, 0)},
+	}
+	return th
+}
+
+func countMessages(t *testing.T, repo *Repository) int {
+	t.Helper()
+	n, err := repo.client.Message.Query().Count(context.Background())
+	if err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	return n
+}
+
+func TestDeleteThreadsNotIn_RemovesMessagesOfPrunedThreads(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	for _, id := range []string{"gone", "kept"} {
+		if err := repo.UpsertThread(ctx, threadWithMessages("claude-"+id, "claude", id)); err != nil {
+			t.Fatalf("upsert %s: %v", id, err)
+		}
+	}
+
+	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
+		t.Fatalf("DeleteThreadsNotIn: %v", err)
+	}
+
+	if got := countMessages(t, repo); got != 2 {
+		t.Errorf("messages left: got %d, want the 2 of the kept thread", got)
+	}
+}
+
+func TestUpsertThread_ReimportsPrunedThread(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	gone := threadWithMessages("claude-gone", "claude", "gone")
+	if err := repo.UpsertThread(ctx, gone); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := repo.UpsertThread(ctx, threadWithMessages("claude-kept", "claude", "kept")); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
+		t.Fatalf("DeleteThreadsNotIn: %v", err)
+	}
+
+	if err := repo.UpsertThread(ctx, gone); err != nil {
+		t.Fatalf("re-upsert of pruned thread: %v", err)
+	}
+	threads, err := repo.ListThreads(ctx, "claude", false)
+	if err != nil {
+		t.Fatalf("ListThreads: %v", err)
+	}
+	if len(threads) != 2 {
+		t.Fatalf("expected 2 threads, got %d", len(threads))
+	}
+	for _, th := range threads {
+		if len(th.Messages) != 2 {
+			t.Errorf("%s: got %d messages, want 2", th.ID, len(th.Messages))
+		}
+	}
+}
+
+// Databases written by earlier versions hold messages whose thread was pruned
+// without them. Deleting the thread row directly reproduces that state.
+func orphanMessages(t *testing.T, repo *Repository, th domain.Thread) {
+	t.Helper()
+	ctx := context.Background()
+	if err := repo.UpsertThread(ctx, th); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := repo.client.Thread.DeleteOneID(th.ID).Exec(ctx); err != nil {
+		t.Fatalf("delete thread row: %v", err)
+	}
+	if got := countMessages(t, repo); got != len(th.Messages) {
+		t.Fatalf("setup: got %d orphaned messages, want %d", got, len(th.Messages))
+	}
+}
+
+func TestUpsertThread_ReplacesOrphanedMessages(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	th := threadWithMessages("claude-abc", "claude", "abc")
+	orphanMessages(t, repo, th)
+
+	if err := repo.UpsertThread(ctx, th); err != nil {
+		t.Fatalf("upsert over orphaned messages: %v", err)
+	}
+	threads, err := repo.ListThreads(ctx, "claude", false)
+	if err != nil {
+		t.Fatalf("ListThreads: %v", err)
+	}
+	if len(threads) != 1 || len(threads[0].Messages) != 2 {
+		t.Fatalf("got %d threads, want 1 with 2 messages", len(threads))
+	}
+	if got := countMessages(t, repo); got != 2 {
+		t.Errorf("messages: got %d, want 2", got)
+	}
+}
+
+func TestDeleteThreadsNotIn_SweepsOrphanedMessages(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	orphanMessages(t, repo, threadWithMessages("claude-old", "claude", "old"))
+	if err := repo.UpsertThread(ctx, threadWithMessages("claude-kept", "claude", "kept")); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
+		t.Fatalf("DeleteThreadsNotIn: %v", err)
+	}
+
+	if got := countMessages(t, repo); got != 2 {
+		t.Errorf("messages left: got %d, want the 2 of the kept thread", got)
+	}
+}

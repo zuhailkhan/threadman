@@ -68,8 +68,13 @@ func (s *Service) SyncAll(ctx context.Context) []SyncResult {
 			result.ThreadsSaved++
 		}
 
-		if err := s.repo.DeleteThreadsNotIn(ctx, p.Name(), discoveredIDs); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("prune stale threads: %v", err))
+		// Finding nothing is not evidence that everything was deleted: session
+		// files that can't be read or recognised are skipped without an error, so
+		// pruning on an empty discovery could erase the provider's stored history.
+		if len(discoveredIDs) > 0 {
+			if err := s.repo.DeleteThreadsNotIn(ctx, p.Name(), discoveredIDs); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("prune stale threads: %v", err))
+			}
 		}
 
 		results = append(results, result)
