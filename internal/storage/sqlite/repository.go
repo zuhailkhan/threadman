@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -161,8 +162,28 @@ func (r *Repository) ListThreads(ctx context.Context, provider string, includeAr
 	for i, e := range entities {
 		threads[i] = mapEntThreadToDomain(e)
 	}
+	sortByActivity(threads)
 
 	return threads, nil
+}
+
+// sortByActivity orders threads by their newest message, most recent first.
+func sortByActivity(threads []domain.Thread) {
+	slices.SortStableFunc(threads, func(a, b domain.Thread) int {
+		return lastActivity(b).Compare(lastActivity(a))
+	})
+}
+
+// lastActivity is the time of a thread's newest message, or when it was
+// created if it has none.
+func lastActivity(t domain.Thread) time.Time {
+	at := t.CreatedAt
+	for _, m := range t.Messages {
+		if m.Timestamp.After(at) {
+			at = m.Timestamp
+		}
+	}
+	return at
 }
 
 func (r *Repository) CountThreads(ctx context.Context) (int, error) {
@@ -203,10 +224,13 @@ func (r *Repository) SearchMessages(ctx context.Context, query string) ([]domain
 	entities, err := r.client.Thread.Query().
 		// Handoff blocks repeat messages stored on their source thread, so
 		// matching them would report the same text twice.
-		Where(thread.HasMessagesWith(
-			message.ContentContains(query),
-			message.KindNEQ(string(domain.KindHandoff)),
-		)).
+		Where(
+			thread.Deleted(false),
+			thread.HasMessagesWith(
+				message.ContentContains(query),
+				message.KindNEQ(string(domain.KindHandoff)),
+			),
+		).
 		WithMessages().
 		All(ctx)
 	if err != nil {
@@ -217,6 +241,7 @@ func (r *Repository) SearchMessages(ctx context.Context, query string) ([]domain
 	for i, e := range entities {
 		threads[i] = mapEntThreadToDomain(e)
 	}
+	sortByActivity(threads)
 
 	return threads, nil
 }

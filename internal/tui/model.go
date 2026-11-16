@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -50,6 +52,12 @@ type backgroundThreadsMsg []domain.Thread
 type hookSetupDoneMsg struct{ errs []error }
 type dbChangedMsg struct{}
 type errMsg struct{ err error }
+
+// launchDoneMsg reports a tool session that threadman started has exited.
+type launchDoneMsg struct {
+	command string
+	err     error
+}
 type countMsg int
 type handoffWrittenMsg struct {
 	sessionID string
@@ -352,7 +360,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// A new viewport starts empty, so the open conversation is laid out
+		// again and the reader stays where it was.
+		offset := m.viewport.YOffset
 		m.viewport = viewport.New(msg.Width, msg.Height-4)
+		if len(m.groupThreads) > 0 {
+			m.viewport.SetContent(renderConversation(m.groupThreads))
+			m.viewport.SetYOffset(offset)
+		}
 
 	case countMsg:
 		if msg == 0 {
@@ -480,6 +495,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case managementDoneMsg:
 		m.state = stateList
 		return m, m.loadThreads()
+
+	case launchDoneMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("could not run %s: %v", msg.command, msg.err)
+		}
+		return m, nil
 
 	case errMsg:
 		m.status = "error: " + msg.err.Error()
@@ -659,8 +680,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.status = "no writer for provider: " + m.thread.Provider
 					return m, nil
 				}
-				cmd := w.OpenCommand(m.thread.OriginalID, m.thread.WorkspacePath)
-				return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+				return m, launch(w.OpenCommand(m.thread.OriginalID, m.thread.WorkspacePath))
 			}
 			m.resumeCursor = 0
 			m.state = stateResumePicker
@@ -762,10 +782,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "y", "Y":
 			m.state = stateThread
 			m.status = ""
-			cmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.handoffWorkspace)
-			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-				return nil
-			})
+			return m, launch(m.handoffTarget.OpenCommand(m.handoffSessionID, m.handoffWorkspace))
 		case "n", "N", "esc":
 			openCmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.handoffWorkspace)
 			m.status = "run: " + strings.Join(openCmd.Args, " ")
@@ -910,8 +927,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.state = stateThread
-			cmd := w.OpenCommand(t.OriginalID, t.WorkspacePath)
-			return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+			return m, launch(w.OpenCommand(t.OriginalID, t.WorkspacePath))
 		}
 	}
 
@@ -1465,15 +1481,39 @@ func renderListRow(n int, g ThreadGroup, width int) string {
 	if title == "" {
 		title = "(untitled)"
 	}
-	if len(title) > titleWidth {
-		title = title[:titleWidth-3] + "..."
-	}
-	ws := filepath.Base(g.Primary.WorkspacePath)
-	if len(ws) > 18 {
-		ws = ws[:15] + "..."
-	}
+	title = truncateRunes(title, titleWidth)
+	ws := truncateRunes(filepath.Base(g.Primary.WorkspacePath), 18)
 	date := lastMessageDate(g.Primary)
 	return fmt.Sprintf("%-3d  %s  %-*s  %-18s  %s", n, icons, titleWidth, title, ws, date)
+}
+
+// truncateRunes shortens s to at most n characters, ending it with "...".
+// Cutting by byte could split a multi-byte character.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n <= 3 {
+		return string(r[:n])
+	}
+	return string(r[:n-3]) + "..."
+}
+
+// launch runs a tool session in the terminal and reports if it can't start,
+// for example because the tool isn't installed or the workspace is gone.
+func launch(cmd *exec.Cmd) tea.Cmd {
+	name := strings.Join(cmd.Args, " ")
+	if cmd.Dir != "" {
+		if info, err := os.Stat(cmd.Dir); err != nil || !info.IsDir() {
+			return func() tea.Msg {
+				return launchDoneMsg{command: name, err: fmt.Errorf("workspace %s no longer exists", cmd.Dir)}
+			}
+		}
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return launchDoneMsg{command: name, err: err}
+	})
 }
 
 func lastMessageDate(t domain.Thread) string {

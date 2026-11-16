@@ -42,13 +42,14 @@ threadman
 # Sync all providers to local database (--provider claude|opencode for one)
 threadman sync
 
-# List threads (--provider to filter)
+# List threads, most recently active first (--provider to filter)
 threadman list
 
 # Search threads
 threadman search <query>
 
 # Print a thread by its number in `threadman list`, or by its thread ID
+# (use the same --provider as the list you took the number from)
 threadman show <number|thread-id>
 
 # Choose the LLM used to summarize threads on handoff, then check it

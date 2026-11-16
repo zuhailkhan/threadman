@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -731,5 +732,59 @@ func TestUpsertThread_EmptyTitleKeepsStoredTitle(t *testing.T) {
 	}
 	if threads[0].Title != "Fix the parser" {
 		t.Errorf("title: got %q, want the stored one", threads[0].Title)
+	}
+}
+
+func TestListThreads_NewestActivityFirst(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	// Created first but talked in most recently.
+	old := baseThread("claude-old", "claude", "old")
+	old.CreatedAt = time.Unix(1000, 0)
+	old.Messages = []domain.Message{{ID: "m", Role: domain.RoleUser, Content: "recent", Timestamp: time.Unix(9000, 0)}}
+	quiet := baseThread("claude-quiet", "claude", "quiet")
+	quiet.CreatedAt = time.Unix(5000, 0)
+	quiet.Messages = []domain.Message{{ID: "m", Role: domain.RoleUser, Content: "older", Timestamp: time.Unix(5000, 0)}}
+	empty := baseThread("claude-empty", "claude", "empty")
+	empty.CreatedAt = time.Unix(7000, 0)
+	for _, th := range []domain.Thread{quiet, old, empty} {
+		if err := repo.UpsertThread(ctx, th); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	threads, err := repo.ListThreads(ctx, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, th := range threads {
+		got = append(got, th.ID)
+	}
+	if want := []string{"claude-old", "claude-empty", "claude-quiet"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("order %v, want %v", got, want)
+	}
+}
+
+func TestSearchMessages_SkipsDeletedThreads(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	th := baseThread("claude-abc", "claude", "abc")
+	th.Messages = []domain.Message{{ID: "m1", Role: domain.RoleUser, Content: "fix the zebra parser", Timestamp: time.Unix(1000, 0)}}
+	if err := repo.UpsertThread(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkThreadDeleted(ctx, th.ID, computeDeleteHash(th)); err != nil {
+		t.Fatal(err)
+	}
+
+	threads, err := repo.SearchMessages(ctx, "zebra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(threads) != 0 {
+		t.Errorf("search found a deleted thread: %+v", threads)
 	}
 }

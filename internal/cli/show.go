@@ -15,10 +15,13 @@ import (
 )
 
 func newShowCmd(svc *syncsvc.Service) *cobra.Command {
-	return &cobra.Command{
+	var provider string
+
+	cmd := &cobra.Command{
 		Use:   "show <number|thread-id>",
 		Short: "Show full conversation for a thread",
 		Long: "Show the full conversation for a thread, chosen by its number in 'threadman list' or by its thread ID.\n" +
+			"A number counts in the same list as 'threadman list' with the same --provider.\n" +
 			"When the output is not a terminal the conversation is printed directly instead of opening a pager.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -31,7 +34,7 @@ func newShowCmd(svc *syncsvc.Service) *cobra.Command {
 				if n < 1 {
 					return fmt.Errorf("argument must be a positive number from 'threadman list' or a thread ID")
 				}
-				threads, err := svc.ListThreads(ctx, "", false)
+				threads, err := svc.ListThreads(ctx, provider, false)
 				if err != nil {
 					return err
 				}
@@ -68,6 +71,9 @@ func newShowCmd(svc *syncsvc.Service) *cobra.Command {
 			return openPager(buf.Bytes())
 		},
 	}
+
+	cmd.Flags().StringVar(&provider, "provider", "", "count numbers within one provider, as 'threadman list --provider' does")
+	return cmd
 }
 
 func writeMessage(buf *bytes.Buffer, m domain.Message) {

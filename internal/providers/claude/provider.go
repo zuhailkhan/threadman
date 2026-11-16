@@ -190,6 +190,10 @@ func (p *Provider) parseMetadata(path string) (domain.Thread, error) {
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		return domain.Thread{}, fmt.Errorf("read %s: %w", path, err)
+	}
+
 	title := customTitle
 	if title == "" {
 		title = aiTitle
@@ -287,6 +291,12 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 		seen[msg.ID] = e
 	}
 
+	// A line that can't be read ends the scan early; storing what was read
+	// so far would silently cut the conversation short.
+	if err := scanner.Err(); err != nil {
+		return t, fmt.Errorf("read %s: %w", t.SourceFilePath, err)
+	}
+
 	messages := make([]domain.Message, len(seen))
 	for _, e := range seen {
 		messages[e.order] = e.msg
@@ -373,16 +383,21 @@ func (p *Provider) findSessionFile(sessionID string) (string, error) {
 	return "", fmt.Errorf("session file not found for session_id: %s", sessionID)
 }
 
+// maxLine is the longest session line read. A line holding a pasted image
+// or a large tool result can run to many megabytes.
+const maxLine = 64 * 1024 * 1024
+
 func newScanner(f *os.File) *bufio.Scanner {
 	s := bufio.NewScanner(f)
-	s.Buffer(make([]byte, 2*1024*1024), 2*1024*1024)
+	s.Buffer(make([]byte, 64*1024), maxLine)
 	return s
 }
 
 func truncate(s string, n int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-3] + "..."
+	return string(r[:n-3]) + "..."
 }

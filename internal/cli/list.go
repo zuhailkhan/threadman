@@ -7,8 +7,10 @@ import (
 	"os/user"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zuhailkhan/threadman/internal/domain"
 	syncsvc "github.com/zuhailkhan/threadman/internal/sync"
 )
 
@@ -35,7 +37,7 @@ func newListCmd(svc *syncsvc.Service) *cobra.Command {
 					title = "(untitled)"
 				}
 				ws := shortenHome(t.WorkspacePath, home)
-				date := t.CreatedAt.Format("02 Jan 06  15:04")
+				date := lastActivity(t).Format("02 Jan 06  15:04")
 				fmt.Fprintf(w, "%d\t[%s]\t%s\t%s\t%s\n", i+1, t.Provider, title, ws, date)
 			}
 			w.Flush()
@@ -45,6 +47,18 @@ func newListCmd(svc *syncsvc.Service) *cobra.Command {
 
 	cmd.Flags().StringVar(&provider, "provider", "", "filter by provider name")
 	return cmd
+}
+
+// lastActivity is the time of a thread's newest message, which is what the
+// list is ordered by, or when it was created if it has none.
+func lastActivity(t domain.Thread) time.Time {
+	at := t.CreatedAt
+	for _, m := range t.Messages {
+		if m.Timestamp.After(at) {
+			at = m.Timestamp
+		}
+	}
+	return at
 }
 
 func homeDir() string {
