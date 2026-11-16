@@ -10,7 +10,7 @@ Everything runs locally: threadman reads the session files your CLIs already wri
 - **Multi-provider import** — reads local session files from Claude Code, OpenCode and pi; first run lets you pick which providers to import
 - **Live updates** — optional per-response hooks ingest new messages as you chat, and the TUI refreshes automatically
 - **Thread reader** — scrollable message view with You/Assistant labels
-- **Handoff** — transfer any conversation to a different provider's native session format and open it immediately
+- **Handoff** — transfer any conversation to a different provider's native session format and open it immediately, as the full transcript or as an LLM-written summary
 - **Thread grouping** — threads handed off across providers are grouped into a single row with provider icon clusters `[C O]`
 - **CLI subcommands** — `sync`, `list`, `search`, `show` for scripting
 
@@ -45,14 +45,53 @@ threadman list
 # Search threads
 threadman search <query>
 
-# Print a thread by its number in `threadman list`
-threadman show <number>
+# Print a thread by its number in `threadman list`, or by its thread ID
+threadman show <number|thread-id>
+
+# Choose the LLM used to summarize threads on handoff, then check it
+threadman llm set --provider ollama --model llama3.2
+threadman llm test
 
 # Install per-response ingestion hooks for Claude Code, OpenCode and pi (--provider to configure just one)
 threadman setup-hooks
 ```
 
 `setup-hooks` adds a `Stop` hook to `~/.claude/settings.json`, an OpenCode plugin at `~/.config/opencode/plugins/threadman.ts`, and a pi extension at `~/.pi/agent/extensions/threadman.ts`. All three call `threadman ingest`, which reads a hook payload from stdin; you normally don't run it yourself.
+
+### Handoff modes
+
+Pressing `h` in a thread asks for the target provider and then for a mode:
+
+| Mode | What the new session contains |
+|------|-------------------------------|
+| Detailed summary | A brief of the older messages (goal, current state, decisions in force and why, rejected approaches, open questions, next steps), then the last 6 messages word for word |
+| Light summary | A brief of the older messages in up to 200 words, then the last 2 messages word for word |
+| Full transcript | Every message, as before |
+
+The original thread is never changed. A summary handoff writes a new session that opens with the brief, which tells the new agent how to read the original (`threadman show <thread-id>`), followed by the newest messages unchanged, since those carry the task in progress. The kept messages always start on one of yours, so a few more than 6 or 2 may be kept. A thread with nothing older than that is handed over whole. Summaries are written from message text only, because threadman does not store tool calls or command output.
+
+The two summary modes need an LLM. Without one, or when it cannot be reached, only the full transcript is offered.
+
+Press `L` in the thread list or in the mode dialog to set the LLM up in the TUI: choose a provider with ←/→, fill in the model, and optionally a base URL and API key, then press Enter to save and check the connection. The same settings are available from the command line:
+
+```bash
+threadman llm set --provider <name> [--model <model>] [--base-url <url>] [--api-key <key>]
+threadman llm show    # current settings
+threadman llm test    # check the server, credentials and model
+threadman llm clear
+```
+
+| Provider | Default address | API key |
+|----------|-----------------|---------|
+| `claude` | Anthropic API | `ANTHROPIC_API_KEY`, or `--api-key` |
+| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY`, or `--api-key` |
+| `deepseek` | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY`, or `--api-key` |
+| `ollama` | `http://localhost:11434/v1` | none |
+| `lmstudio` | `http://localhost:1234/v1` | none |
+
+`--model` is required except for `claude` (defaults to `claude-opus-5-5`) and `deepseek` (defaults to `deepseek-chat`). Any other server that speaks the OpenAI chat-completions API works with `--provider openai --base-url <url>`. The hosted APIs bill per token, separately from any chat subscription; Ollama and LM Studio run locally. Settings are stored in `~/.config/threadman/config.json`. An API key you enter is kept in the system keyring (Windows Credential Manager, macOS Keychain, or the Secret Service on Linux) and not in that file; only when no keyring is available is it written to the file instead. `threadman llm show` reports which one is in use.
+
+threadman checks the LLM when it starts and shows the result in the status bar, and checks again each time the mode dialog opens. A conversation too long for the model fails with the provider's error rather than being cut short; hand off the full transcript instead.
 
 ### TUI Keybindings
 
@@ -72,6 +111,7 @@ threadman setup-hooks
 | PgUp / PgDn | Scroll thread |
 | Space | Toggle selection (first-run provider picker, delete picker) |
 | h | Handoff current thread to another provider |
+| L | Set up the LLM used for handoff summaries |
 | r | Resume current thread in its native provider CLI |
 
 ## Installation
@@ -112,6 +152,8 @@ threadman/
 │   ├── storage/sqlite/   # SQLite persistence (ent ORM)
 │   ├── sync/             # Sync service: discover → hydrate → upsert
 │   ├── hooks/            # Provider hook and plugin setup
+│   ├── llm/              # LLM config and clients (Claude, OpenAI-compatible)
+│   ├── handoff/          # Handoff modes and thread summarization
 │   ├── tui/              # Bubble Tea interface
 │   └── cli/              # Cobra commands + TUI launcher
 └── go.mod

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fsnotify/fsnotify"
 	"github.com/zuhailkhan/threadman/internal/domain"
+	"github.com/zuhailkhan/threadman/internal/handoff"
 	"github.com/zuhailkhan/threadman/internal/hooks"
 	"github.com/zuhailkhan/threadman/internal/ports"
 	syncsvc "github.com/zuhailkhan/threadman/internal/sync"
@@ -26,6 +28,9 @@ const (
 	stateThread
 	stateSearch
 	stateHandoffPicker
+	stateHandoffMode
+	stateHandoffWorking
+	stateLLMSetup
 	stateHandoffConfirm
 	stateResumePicker
 	stateRename
@@ -54,6 +59,7 @@ type handoffWrittenMsg struct {
 }
 type handoffErrMsg struct{ err error }
 type handoffLinkErrMsg struct{ err error }
+type llmStatusMsg struct{ status handoff.Status }
 type managementDoneMsg struct{}
 
 type Model struct {
@@ -78,6 +84,13 @@ type Model struct {
 	handoffTargets      []ports.ThreadWriter
 	handoffTarget       ports.ThreadWriter
 	handoffSessionID    string
+	handoffModeCursor   int
+	handoffMode         handoff.Mode
+	handoffCancel       context.CancelFunc
+	summarizer          *handoff.Summarizer
+	llmStatus           handoff.Status
+	llmChecking         bool
+	llmSetup            llmSetupForm
 	resumeCursor        int
 	showArchived        bool
 	renameDraft         string
@@ -151,7 +164,7 @@ var providerLabels = map[string]string{
 	"pi":       "pi",
 }
 
-func New(svc *syncsvc.Service, dbPath string, writers []ports.ThreadWriter) Model {
+func New(svc *syncsvc.Service, dbPath string, writers []ports.ThreadWriter, summarizer *handoff.Summarizer) Model {
 	providers := make([]onboardingProvider, 0)
 	for _, name := range svc.ProviderNames() {
 		label := providerLabels[name]
@@ -162,7 +175,7 @@ func New(svc *syncsvc.Service, dbPath string, writers []ports.ThreadWriter) Mode
 	}
 	ch := make(chan struct{}, 1)
 	go watchDB(dbPath, ch)
-	return Model{svc: svc, dbChanges: ch, onboardingProviders: providers, writers: writers}
+	return Model{svc: svc, dbChanges: ch, onboardingProviders: providers, writers: writers, summarizer: summarizer, llmChecking: true}
 }
 
 func watchDB(path string, ch chan<- struct{}) {
@@ -198,7 +211,18 @@ func watchDB(path string, ch chan<- struct{}) {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.checkFirstRun(), waitForDBChange(m.dbChanges))
+	return tea.Batch(m.checkFirstRun(), waitForDBChange(m.dbChanges), m.checkLLM())
+}
+
+// checkLLM pings the configured LLM in the background so the handoff dialog
+// knows whether summaries can be offered.
+func (m Model) checkLLM() tea.Cmd {
+	s := m.summarizer
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return llmStatusMsg{s.Check(ctx)}
+	}
 }
 
 func waitForDBChange(ch <-chan struct{}) tea.Cmd {
@@ -268,12 +292,26 @@ func (m Model) openThread(t domain.Thread) tea.Cmd {
 	}
 }
 
-func (m Model) writeHandoff(w ports.ThreadWriter) tea.Cmd {
+// writeHandoff builds the copy for the chosen mode and writes it into the
+// target provider. m.thread itself is only read.
+func (m Model) writeHandoff(ctx context.Context, w ports.ThreadWriter, mode handoff.Mode) tea.Cmd {
 	t := m.thread
+	s := m.summarizer
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		timeout := 30 * time.Second
+		if mode.NeedsLLM() {
+			timeout = 10 * time.Minute
+		}
+		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		id, err := w.WriteThread(ctx, t)
+		out, err := s.Prepare(ctx, t, mode)
+		if err != nil {
+			return handoffErrMsg{err}
+		}
+		if err := ctx.Err(); err != nil {
+			return handoffErrMsg{err}
+		}
+		id, err := w.WriteThread(ctx, out)
 		if err != nil {
 			return handoffErrMsg{err}
 		}
@@ -464,7 +502,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case llmStatusMsg:
+		m.llmStatus = msg.status
+		m.llmChecking = false
+		if m.state == stateHandoffMode {
+			m.handoffModeCursor = m.firstUsableMode()
+		}
+
 	case handoffWrittenMsg:
+		m.handoffCancel = nil
 		m.handoffTarget = msg.writer
 		m.handoffSessionID = msg.sessionID
 		m.status = ""
@@ -472,6 +518,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.recordHandoffLink(msg.writer.Name(), msg.sessionID)
 
 	case handoffErrMsg:
+		m.handoffCancel = nil
+		if errors.Is(msg.err, context.Canceled) {
+			// the user pressed Esc; the state was already reset
+			return m, nil
+		}
 		m.status = "handoff error: " + msg.err.Error()
 		m.state = stateThread
 
@@ -581,6 +632,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "H":
 			m.status = "configuring hooks..."
 			return m, m.setupHooksCmd()
+		case "L":
+			m.openLLMSetup()
 		case "/":
 			m.state = stateSearch
 			m.query = ""
@@ -697,10 +750,59 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.handoffTargets) == 0 {
 				return m, nil
 			}
-			w := m.handoffTargets[m.handoffCursor]
-			m.handoffTarget = w
-			m.status = "writing session..."
-			return m, m.writeHandoff(w)
+			m.handoffTarget = m.handoffTargets[m.handoffCursor]
+			m.state = stateHandoffMode
+			// Re-check so an LLM server started (or configured) since launch
+			// is picked up.
+			m.llmChecking = true
+			m.handoffModeCursor = m.firstUsableMode()
+			return m, m.checkLLM()
+		}
+
+	case stateLLMSetup:
+		return m.handleLLMSetupKey(msg)
+
+	case stateHandoffMode:
+		switch msg.String() {
+		case "esc", "q":
+			m.state = stateHandoffPicker
+		case "L":
+			m.openLLMSetup()
+		case "up", "k":
+			for i := m.handoffModeCursor - 1; i >= 0; i-- {
+				if m.modeUsable(handoff.Modes[i]) {
+					m.handoffModeCursor = i
+					break
+				}
+			}
+		case "down", "j":
+			for i := m.handoffModeCursor + 1; i < len(handoff.Modes); i++ {
+				if m.modeUsable(handoff.Modes[i]) {
+					m.handoffModeCursor = i
+					break
+				}
+			}
+		case "enter":
+			mode := handoff.Modes[m.handoffModeCursor]
+			if !m.modeUsable(mode) {
+				return m, nil
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			m.handoffCancel = cancel
+			m.handoffMode = mode
+			m.status = ""
+			m.state = stateHandoffWorking
+			return m, m.writeHandoff(ctx, m.handoffTarget, mode)
+		}
+
+	case stateHandoffWorking:
+		if msg.String() == "esc" {
+			if m.handoffCancel != nil {
+				m.handoffCancel()
+				m.handoffCancel = nil
+			}
+			m.status = "handoff cancelled"
+			m.state = stateThread
 		}
 
 	case stateHandoffConfirm:
@@ -893,6 +995,12 @@ func (m Model) View() string {
 		return m.viewThread()
 	case stateHandoffPicker:
 		return m.viewHandoffPicker()
+	case stateLLMSetup:
+		return m.viewLLMSetup()
+	case stateHandoffMode:
+		return m.viewHandoffMode()
+	case stateHandoffWorking:
+		return m.viewHandoffWorking()
 	case stateHandoffConfirm:
 		return m.viewHandoffConfirm()
 	case stateResumePicker:
@@ -989,6 +1097,111 @@ func (m Model) viewHandoffPicker() string {
 	}
 	inner.WriteString("\n")
 	inner.WriteString(styleHint.Render("  ↑↓ navigate  Enter select  Esc back") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+// modeUsable reports whether a handoff mode can be chosen right now. The
+// summary modes need a configured LLM that answered the last check.
+func (m Model) modeUsable(mode handoff.Mode) bool {
+	return !mode.NeedsLLM() || (!m.llmChecking && m.llmStatus.Ready())
+}
+
+func (m Model) firstUsableMode() int {
+	for i, mode := range handoff.Modes {
+		if m.modeUsable(mode) {
+			return i
+		}
+	}
+	return 0
+}
+
+// llmSummary is a one-line description of the LLM's state.
+func (m Model) llmSummary() string {
+	switch {
+	case m.llmChecking:
+		return "LLM: checking…"
+	case !m.llmStatus.Configured && m.llmStatus.Err != nil:
+		return "LLM: config error"
+	case !m.llmStatus.Configured:
+		return "LLM: not configured"
+	case m.llmStatus.Err != nil:
+		return "LLM: " + m.llmStatus.Label + " unavailable"
+	default:
+		return "LLM: " + m.llmStatus.Label + " ready"
+	}
+}
+
+func (m Model) viewHandoffMode() string {
+	dialogWidth := 56
+
+	label := providerLabels[m.handoffTarget.Name()]
+	if label == "" {
+		label = m.handoffTarget.Name()
+	}
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString(fmt.Sprintf("  Hand off to %s as:\n", label))
+	inner.WriteString("\n")
+	for i, mode := range handoff.Modes {
+		switch {
+		case !m.modeUsable(mode):
+			inner.WriteString(styleHint.Render("  "+mode.Label()) + "\n")
+		case i == m.handoffModeCursor:
+			inner.WriteString(styleCursor.Render("▶") + " " + mode.Label() + "\n")
+		default:
+			inner.WriteString("  " + mode.Label() + "\n")
+		}
+	}
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  "+m.llmSummary()) + "\n")
+	switch {
+	case m.llmChecking:
+	case m.llmStatus.Err != nil:
+		reason := lipgloss.NewStyle().Width(dialogWidth - 4).Render(m.llmStatus.Err.Error())
+		for _, line := range strings.Split(reason, "\n") {
+			inner.WriteString(styleHint.Render("  "+line) + "\n")
+		}
+	case !m.llmStatus.Configured:
+		inner.WriteString(styleHint.Render("  Summaries need an LLM: press L to set one up") + "\n")
+	}
+	inner.WriteString("\n")
+	inner.WriteString(styleHint.Render("  ↑↓ navigate  Enter select  L LLM setup  Esc back") + "\n")
+	inner.WriteString("\n")
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#444444")).
+		Width(dialogWidth).
+		Render(inner.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewHandoffWorking() string {
+	dialogWidth := 56
+
+	line := "  Writing session…"
+	if m.handoffMode.NeedsLLM() {
+		line = "  Summarizing with " + m.llmStatus.Label + "…"
+	}
+
+	var inner strings.Builder
+	inner.WriteString("\n")
+	inner.WriteString(line + "\n")
+	inner.WriteString("\n")
+	if m.handoffMode.NeedsLLM() {
+		inner.WriteString(styleHint.Render("  This can take a minute for long threads.") + "\n")
+	}
+	inner.WriteString(styleHint.Render("  Esc cancel") + "\n")
 	inner.WriteString("\n")
 
 	dialog := lipgloss.NewStyle().
@@ -1170,7 +1383,7 @@ func (m Model) viewList() string {
 	if m.showArchived {
 		archivedHint = "[A]hide-archived"
 	}
-	hints := styleHint.Render("[s]sync [/]search [d]del [n]ren [a]arch " + archivedHint + " [q]quit")
+	hints := styleHint.Render("[s]sync [/]search [d]del [n]ren [a]arch " + archivedHint + " [L]llm [q]quit")
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(hints)
 	if gap < 1 {
 		gap = 1
@@ -1220,9 +1433,9 @@ func (m Model) viewList() string {
 	if m.status != "" {
 		statusLine = m.status
 	} else {
-		count := fmt.Sprintf("%d threads", len(m.filteredGroups))
+		count := fmt.Sprintf("%d threads  ·  %s", len(m.filteredGroups), m.llmSummary())
 		nav := "↑↓ navigate  Enter open"
-		statusGap := m.width - len(count) - len(nav) - 2
+		statusGap := m.width - lipgloss.Width(count) - lipgloss.Width(nav) - 2
 		if statusGap < 1 {
 			statusGap = 1
 		}
