@@ -158,10 +158,11 @@ func providerIcons(g ThreadGroup) string {
 }
 
 var providerLabels = map[string]string{
-	"claude":   "Claude Code",
-	"gemini":   "Gemini CLI",
-	"opencode": "OpenCode",
-	"pi":       "pi",
+	"claude":      "Claude Code",
+	"gemini":      "Gemini CLI",
+	"opencode":    "OpenCode",
+	"pi":          "pi",
+	"antigravity": "Antigravity",
 }
 
 func New(svc *syncsvc.Service, dbPath string, writers []ports.ThreadWriter, summarizer *handoff.Summarizer) Model {
@@ -338,9 +339,14 @@ func (m Model) availableHandoffTargets() []ports.ThreadWriter {
 	}
 	available := make([]ports.ThreadWriter, 0, len(m.writers))
 	for _, w := range m.writers {
-		if !inGroup[w.Name()] {
-			available = append(available, w)
+		if inGroup[w.Name()] {
+			continue
 		}
+		// Some providers can be read and resumed but not written to.
+		if ro, ok := w.(interface{ ReadOnly() bool }); ok && ro.ReadOnly() {
+			continue
+		}
+		available = append(available, w)
 	}
 	return available
 }

@@ -7,19 +7,20 @@ import (
 )
 
 var (
-	colorClaude   = lipgloss.Color("#4A90E2")
-	colorGemini   = lipgloss.Color("#00BFA5")
-	colorOpenCode = lipgloss.Color("#9B59B6")
-	colorPi       = lipgloss.Color("#E67E22")
-	colorDefault  = lipgloss.Color("#888888")
-	colorAmber    = lipgloss.Color("#F5A623")
-	colorGreen    = lipgloss.Color("#7ED321")
-	colorDim      = lipgloss.Color("#555555")
-	colorSelected = lipgloss.Color("#2A2A2A")
+	colorClaude      = lipgloss.Color("#4A90E2")
+	colorGemini      = lipgloss.Color("#00BFA5")
+	colorOpenCode    = lipgloss.Color("#9B59B6")
+	colorPi          = lipgloss.Color("#E67E22")
+	colorAntigravity = lipgloss.Color("#E84393")
+	colorDefault     = lipgloss.Color("#888888")
+	colorAmber       = lipgloss.Color("#F5A623")
+	colorGreen       = lipgloss.Color("#7ED321")
+	colorDim         = lipgloss.Color("#555555")
+	colorSelected    = lipgloss.Color("#2A2A2A")
 
-	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF"))
-	styleHint  = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	styleSep   = lipgloss.NewStyle().Foreground(colorDim)
+	styleTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF"))
+	styleHint   = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	styleSep    = lipgloss.NewStyle().Foreground(colorDim)
 	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#AAAAAA"))
 
 	styleSelected = lipgloss.NewStyle().
@@ -50,6 +51,8 @@ func providerIcon(name string) string {
 		return "O"
 	case "pi":
 		return "P"
+	case "antigravity":
+		return "A"
 	default:
 		if len(name) > 0 {
 			return strings.ToUpper(name[:1])
@@ -69,6 +72,8 @@ func providerStyle(name string) lipgloss.Style {
 		color = colorOpenCode
 	case "pi":
 		color = colorPi
+	case "antigravity":
+		color = colorAntigravity
 	default:
 		color = colorDefault
 	}
