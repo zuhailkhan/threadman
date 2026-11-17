@@ -24,6 +24,12 @@ type Message struct {
 	Content string `json:"content,omitempty"`
 	// Timestamp holds the value of the "timestamp" field.
 	Timestamp time.Time `json:"timestamp,omitempty"`
+	// Kind holds the value of the "kind" field.
+	Kind string `json:"kind,omitempty"`
+	// HandoffID holds the value of the "handoff_id" field.
+	HandoffID string `json:"handoff_id,omitempty"`
+	// Tools holds the value of the "tools" field.
+	Tools string `json:"tools,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the MessageQuery when eager-loading is set.
 	Edges           MessageEdges `json:"edges"`
@@ -56,7 +62,7 @@ func (*Message) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case message.FieldID, message.FieldRole, message.FieldContent:
+		case message.FieldID, message.FieldRole, message.FieldContent, message.FieldKind, message.FieldHandoffID, message.FieldTools:
 			values[i] = new(sql.NullString)
 		case message.FieldTimestamp:
 			values[i] = new(sql.NullTime)
@@ -100,6 +106,24 @@ func (_m *Message) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field timestamp", values[i])
 			} else if value.Valid {
 				_m.Timestamp = value.Time
+			}
+		case message.FieldKind:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field kind", values[i])
+			} else if value.Valid {
+				_m.Kind = value.String
+			}
+		case message.FieldHandoffID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field handoff_id", values[i])
+			} else if value.Valid {
+				_m.HandoffID = value.String
+			}
+		case message.FieldTools:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field tools", values[i])
+			} else if value.Valid {
+				_m.Tools = value.String
 			}
 		case message.ForeignKeys[0]:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -157,6 +181,15 @@ func (_m *Message) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("timestamp=")
 	builder.WriteString(_m.Timestamp.Format(time.ANSIC))
+	builder.WriteString(", ")
+	builder.WriteString("kind=")
+	builder.WriteString(_m.Kind)
+	builder.WriteString(", ")
+	builder.WriteString("handoff_id=")
+	builder.WriteString(_m.HandoffID)
+	builder.WriteString(", ")
+	builder.WriteString("tools=")
+	builder.WriteString(_m.Tools)
 	builder.WriteByte(')')
 	return builder.String()
 }

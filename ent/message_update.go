@@ -71,6 +71,48 @@ func (_u *MessageUpdate) SetNillableTimestamp(v *time.Time) *MessageUpdate {
 	return _u
 }
 
+// SetKind sets the "kind" field.
+func (_u *MessageUpdate) SetKind(v string) *MessageUpdate {
+	_u.mutation.SetKind(v)
+	return _u
+}
+
+// SetNillableKind sets the "kind" field if the given value is not nil.
+func (_u *MessageUpdate) SetNillableKind(v *string) *MessageUpdate {
+	if v != nil {
+		_u.SetKind(*v)
+	}
+	return _u
+}
+
+// SetHandoffID sets the "handoff_id" field.
+func (_u *MessageUpdate) SetHandoffID(v string) *MessageUpdate {
+	_u.mutation.SetHandoffID(v)
+	return _u
+}
+
+// SetNillableHandoffID sets the "handoff_id" field if the given value is not nil.
+func (_u *MessageUpdate) SetNillableHandoffID(v *string) *MessageUpdate {
+	if v != nil {
+		_u.SetHandoffID(*v)
+	}
+	return _u
+}
+
+// SetTools sets the "tools" field.
+func (_u *MessageUpdate) SetTools(v string) *MessageUpdate {
+	_u.mutation.SetTools(v)
+	return _u
+}
+
+// SetNillableTools sets the "tools" field if the given value is not nil.
+func (_u *MessageUpdate) SetNillableTools(v *string) *MessageUpdate {
+	if v != nil {
+		_u.SetTools(*v)
+	}
+	return _u
+}
+
 // SetThreadID sets the "thread" edge to the Thread entity by ID.
 func (_u *MessageUpdate) SetThreadID(id string) *MessageUpdate {
 	_u.mutation.SetThreadID(id)
@@ -145,6 +187,15 @@ func (_u *MessageUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Timestamp(); ok {
 		_spec.SetField(message.FieldTimestamp, field.TypeTime, value)
+	}
+	if value, ok := _u.mutation.Kind(); ok {
+		_spec.SetField(message.FieldKind, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.HandoffID(); ok {
+		_spec.SetField(message.FieldHandoffID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Tools(); ok {
+		_spec.SetField(message.FieldTools, field.TypeString, value)
 	}
 	if _u.mutation.ThreadCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -233,6 +284,48 @@ func (_u *MessageUpdateOne) SetTimestamp(v time.Time) *MessageUpdateOne {
 func (_u *MessageUpdateOne) SetNillableTimestamp(v *time.Time) *MessageUpdateOne {
 	if v != nil {
 		_u.SetTimestamp(*v)
+	}
+	return _u
+}
+
+// SetKind sets the "kind" field.
+func (_u *MessageUpdateOne) SetKind(v string) *MessageUpdateOne {
+	_u.mutation.SetKind(v)
+	return _u
+}
+
+// SetNillableKind sets the "kind" field if the given value is not nil.
+func (_u *MessageUpdateOne) SetNillableKind(v *string) *MessageUpdateOne {
+	if v != nil {
+		_u.SetKind(*v)
+	}
+	return _u
+}
+
+// SetHandoffID sets the "handoff_id" field.
+func (_u *MessageUpdateOne) SetHandoffID(v string) *MessageUpdateOne {
+	_u.mutation.SetHandoffID(v)
+	return _u
+}
+
+// SetNillableHandoffID sets the "handoff_id" field if the given value is not nil.
+func (_u *MessageUpdateOne) SetNillableHandoffID(v *string) *MessageUpdateOne {
+	if v != nil {
+		_u.SetHandoffID(*v)
+	}
+	return _u
+}
+
+// SetTools sets the "tools" field.
+func (_u *MessageUpdateOne) SetTools(v string) *MessageUpdateOne {
+	_u.mutation.SetTools(v)
+	return _u
+}
+
+// SetNillableTools sets the "tools" field if the given value is not nil.
+func (_u *MessageUpdateOne) SetNillableTools(v *string) *MessageUpdateOne {
+	if v != nil {
+		_u.SetTools(*v)
 	}
 	return _u
 }
@@ -341,6 +434,15 @@ func (_u *MessageUpdateOne) sqlSave(ctx context.Context) (_node *Message, err er
 	}
 	if value, ok := _u.mutation.Timestamp(); ok {
 		_spec.SetField(message.FieldTimestamp, field.TypeTime, value)
+	}
+	if value, ok := _u.mutation.Kind(); ok {
+		_spec.SetField(message.FieldKind, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.HandoffID(); ok {
+		_spec.SetField(message.FieldHandoffID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Tools(); ok {
+		_spec.SetField(message.FieldTools, field.TypeString, value)
 	}
 	if _u.mutation.ThreadCleared() {
 		edge := &sqlgraph.EdgeSpec{

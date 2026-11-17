@@ -17,9 +17,9 @@ var (
 	colorDim      = lipgloss.Color("#555555")
 	colorSelected = lipgloss.Color("#2A2A2A")
 
-	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF"))
-	styleHint  = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	styleSep   = lipgloss.NewStyle().Foreground(colorDim)
+	styleTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF"))
+	styleHint   = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	styleSep    = lipgloss.NewStyle().Foreground(colorDim)
 	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#AAAAAA"))
 
 	styleSelected = lipgloss.NewStyle().
@@ -38,6 +38,7 @@ var (
 	styleYou       = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
 	styleAssistant = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
 	styleArchived  = lipgloss.NewStyle().Foreground(colorDim)
+	styleWarn      = lipgloss.NewStyle().Foreground(colorAmber)
 )
 
 func providerIcon(name string) string {

@@ -180,7 +180,7 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 		SELECT message_id, data
 		FROM part
 		WHERE session_id = ?
-		  AND json_extract(data, '$.type') = 'text'
+		  AND json_extract(data, '$.type') IN ('text', 'tool')
 		ORDER BY time_created
 	`, t.OriginalID)
 	if err != nil {
@@ -189,6 +189,7 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 	defer partRows.Close()
 
 	textsByMsg := make(map[string][]string)
+	toolsByMsg := make(map[string][]domain.ToolCall)
 	for partRows.Next() {
 		var (
 			msgID   string
@@ -197,10 +198,37 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 		if err := partRows.Scan(&msgID, &rawData); err != nil {
 			continue
 		}
+		// A tool part records the call and, once it has run, its result:
+		// {"type":"tool","tool":"bash","state":{"status":"completed",
+		// "input":{...},"output":"..."}}; a failed call has an error instead.
 		var part struct {
-			Text string `json:"text"`
+			Type  string `json:"type"`
+			Text  string `json:"text"`
+			Tool  string `json:"tool"`
+			State struct {
+				Status string          `json:"status"`
+				Input  json.RawMessage `json:"input"`
+				Output string          `json:"output"`
+				Error  string          `json:"error"`
+			} `json:"state"`
 		}
-		if err := json.Unmarshal([]byte(rawData), &part); err != nil || part.Text == "" {
+		if err := json.Unmarshal([]byte(rawData), &part); err != nil {
+			continue
+		}
+		if part.Type == "tool" {
+			output := part.State.Output
+			if output == "" {
+				output = part.State.Error
+			}
+			toolsByMsg[msgID] = append(toolsByMsg[msgID], domain.ToolCall{
+				Name:   part.Tool,
+				Input:  domain.ToolInput(part.State.Input),
+				Output: domain.Shorten(output, domain.MaxToolOutput),
+				Error:  part.State.Status == "error",
+			})
+			continue
+		}
+		if part.Text == "" {
 			continue
 		}
 		textsByMsg[msgID] = append(textsByMsg[msgID], part.Text)
@@ -212,7 +240,7 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 	var messages []domain.Message
 	for _, m := range msgs {
 		content := strings.Join(textsByMsg[m.id], "")
-		if content == "" {
+		if content == "" && len(toolsByMsg[m.id]) == 0 {
 			continue
 		}
 		role := domain.RoleUser
@@ -224,6 +252,7 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 			Role:      role,
 			Content:   content,
 			Timestamp: time.UnixMilli(m.timeCreatedMs),
+			Tools:     toolsByMsg[m.id],
 		})
 	}
 

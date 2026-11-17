@@ -42,6 +42,48 @@ func (_c *MessageCreate) SetTimestamp(v time.Time) *MessageCreate {
 	return _c
 }
 
+// SetKind sets the "kind" field.
+func (_c *MessageCreate) SetKind(v string) *MessageCreate {
+	_c.mutation.SetKind(v)
+	return _c
+}
+
+// SetNillableKind sets the "kind" field if the given value is not nil.
+func (_c *MessageCreate) SetNillableKind(v *string) *MessageCreate {
+	if v != nil {
+		_c.SetKind(*v)
+	}
+	return _c
+}
+
+// SetHandoffID sets the "handoff_id" field.
+func (_c *MessageCreate) SetHandoffID(v string) *MessageCreate {
+	_c.mutation.SetHandoffID(v)
+	return _c
+}
+
+// SetNillableHandoffID sets the "handoff_id" field if the given value is not nil.
+func (_c *MessageCreate) SetNillableHandoffID(v *string) *MessageCreate {
+	if v != nil {
+		_c.SetHandoffID(*v)
+	}
+	return _c
+}
+
+// SetTools sets the "tools" field.
+func (_c *MessageCreate) SetTools(v string) *MessageCreate {
+	_c.mutation.SetTools(v)
+	return _c
+}
+
+// SetNillableTools sets the "tools" field if the given value is not nil.
+func (_c *MessageCreate) SetNillableTools(v *string) *MessageCreate {
+	if v != nil {
+		_c.SetTools(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *MessageCreate) SetID(v string) *MessageCreate {
 	_c.mutation.SetID(v)
@@ -74,6 +116,7 @@ func (_c *MessageCreate) Mutation() *MessageMutation {
 
 // Save creates the Message in the database.
 func (_c *MessageCreate) Save(ctx context.Context) (*Message, error) {
+	_c.defaults()
 	return withHooks(ctx, _c.sqlSave, _c.mutation, _c.hooks)
 }
 
@@ -99,6 +142,22 @@ func (_c *MessageCreate) ExecX(ctx context.Context) {
 	}
 }
 
+// defaults sets the default values of the builder before save.
+func (_c *MessageCreate) defaults() {
+	if _, ok := _c.mutation.Kind(); !ok {
+		v := message.DefaultKind
+		_c.mutation.SetKind(v)
+	}
+	if _, ok := _c.mutation.HandoffID(); !ok {
+		v := message.DefaultHandoffID
+		_c.mutation.SetHandoffID(v)
+	}
+	if _, ok := _c.mutation.Tools(); !ok {
+		v := message.DefaultTools
+		_c.mutation.SetTools(v)
+	}
+}
+
 // check runs all checks and user-defined validators on the builder.
 func (_c *MessageCreate) check() error {
 	if _, ok := _c.mutation.Role(); !ok {
@@ -109,6 +168,15 @@ func (_c *MessageCreate) check() error {
 	}
 	if _, ok := _c.mutation.Timestamp(); !ok {
 		return &ValidationError{Name: "timestamp", err: errors.New(`ent: missing required field "Message.timestamp"`)}
+	}
+	if _, ok := _c.mutation.Kind(); !ok {
+		return &ValidationError{Name: "kind", err: errors.New(`ent: missing required field "Message.kind"`)}
+	}
+	if _, ok := _c.mutation.HandoffID(); !ok {
+		return &ValidationError{Name: "handoff_id", err: errors.New(`ent: missing required field "Message.handoff_id"`)}
+	}
+	if _, ok := _c.mutation.Tools(); !ok {
+		return &ValidationError{Name: "tools", err: errors.New(`ent: missing required field "Message.tools"`)}
 	}
 	return nil
 }
@@ -157,6 +225,18 @@ func (_c *MessageCreate) createSpec() (*Message, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Timestamp(); ok {
 		_spec.SetField(message.FieldTimestamp, field.TypeTime, value)
 		_node.Timestamp = value
+	}
+	if value, ok := _c.mutation.Kind(); ok {
+		_spec.SetField(message.FieldKind, field.TypeString, value)
+		_node.Kind = value
+	}
+	if value, ok := _c.mutation.HandoffID(); ok {
+		_spec.SetField(message.FieldHandoffID, field.TypeString, value)
+		_node.HandoffID = value
+	}
+	if value, ok := _c.mutation.Tools(); ok {
+		_spec.SetField(message.FieldTools, field.TypeString, value)
+		_node.Tools = value
 	}
 	if nodes := _c.mutation.ThreadIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -263,6 +343,42 @@ func (u *MessageUpsert) UpdateTimestamp() *MessageUpsert {
 	return u
 }
 
+// SetKind sets the "kind" field.
+func (u *MessageUpsert) SetKind(v string) *MessageUpsert {
+	u.Set(message.FieldKind, v)
+	return u
+}
+
+// UpdateKind sets the "kind" field to the value that was provided on create.
+func (u *MessageUpsert) UpdateKind() *MessageUpsert {
+	u.SetExcluded(message.FieldKind)
+	return u
+}
+
+// SetHandoffID sets the "handoff_id" field.
+func (u *MessageUpsert) SetHandoffID(v string) *MessageUpsert {
+	u.Set(message.FieldHandoffID, v)
+	return u
+}
+
+// UpdateHandoffID sets the "handoff_id" field to the value that was provided on create.
+func (u *MessageUpsert) UpdateHandoffID() *MessageUpsert {
+	u.SetExcluded(message.FieldHandoffID)
+	return u
+}
+
+// SetTools sets the "tools" field.
+func (u *MessageUpsert) SetTools(v string) *MessageUpsert {
+	u.Set(message.FieldTools, v)
+	return u
+}
+
+// UpdateTools sets the "tools" field to the value that was provided on create.
+func (u *MessageUpsert) UpdateTools() *MessageUpsert {
+	u.SetExcluded(message.FieldTools)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create except the ID field.
 // Using this option is equivalent to using:
 //
@@ -353,6 +469,48 @@ func (u *MessageUpsertOne) UpdateTimestamp() *MessageUpsertOne {
 	})
 }
 
+// SetKind sets the "kind" field.
+func (u *MessageUpsertOne) SetKind(v string) *MessageUpsertOne {
+	return u.Update(func(s *MessageUpsert) {
+		s.SetKind(v)
+	})
+}
+
+// UpdateKind sets the "kind" field to the value that was provided on create.
+func (u *MessageUpsertOne) UpdateKind() *MessageUpsertOne {
+	return u.Update(func(s *MessageUpsert) {
+		s.UpdateKind()
+	})
+}
+
+// SetHandoffID sets the "handoff_id" field.
+func (u *MessageUpsertOne) SetHandoffID(v string) *MessageUpsertOne {
+	return u.Update(func(s *MessageUpsert) {
+		s.SetHandoffID(v)
+	})
+}
+
+// UpdateHandoffID sets the "handoff_id" field to the value that was provided on create.
+func (u *MessageUpsertOne) UpdateHandoffID() *MessageUpsertOne {
+	return u.Update(func(s *MessageUpsert) {
+		s.UpdateHandoffID()
+	})
+}
+
+// SetTools sets the "tools" field.
+func (u *MessageUpsertOne) SetTools(v string) *MessageUpsertOne {
+	return u.Update(func(s *MessageUpsert) {
+		s.SetTools(v)
+	})
+}
+
+// UpdateTools sets the "tools" field to the value that was provided on create.
+func (u *MessageUpsertOne) UpdateTools() *MessageUpsertOne {
+	return u.Update(func(s *MessageUpsert) {
+		s.UpdateTools()
+	})
+}
+
 // Exec executes the query.
 func (u *MessageUpsertOne) Exec(ctx context.Context) error {
 	if len(u.create.conflict) == 0 {
@@ -410,6 +568,7 @@ func (_c *MessageCreateBulk) Save(ctx context.Context) ([]*Message, error) {
 	for i := range _c.builders {
 		func(i int, root context.Context) {
 			builder := _c.builders[i]
+			builder.defaults()
 			var mut Mutator = MutateFunc(func(ctx context.Context, m Mutation) (Value, error) {
 				mutation, ok := m.(*MessageMutation)
 				if !ok {
@@ -606,6 +765,48 @@ func (u *MessageUpsertBulk) SetTimestamp(v time.Time) *MessageUpsertBulk {
 func (u *MessageUpsertBulk) UpdateTimestamp() *MessageUpsertBulk {
 	return u.Update(func(s *MessageUpsert) {
 		s.UpdateTimestamp()
+	})
+}
+
+// SetKind sets the "kind" field.
+func (u *MessageUpsertBulk) SetKind(v string) *MessageUpsertBulk {
+	return u.Update(func(s *MessageUpsert) {
+		s.SetKind(v)
+	})
+}
+
+// UpdateKind sets the "kind" field to the value that was provided on create.
+func (u *MessageUpsertBulk) UpdateKind() *MessageUpsertBulk {
+	return u.Update(func(s *MessageUpsert) {
+		s.UpdateKind()
+	})
+}
+
+// SetHandoffID sets the "handoff_id" field.
+func (u *MessageUpsertBulk) SetHandoffID(v string) *MessageUpsertBulk {
+	return u.Update(func(s *MessageUpsert) {
+		s.SetHandoffID(v)
+	})
+}
+
+// UpdateHandoffID sets the "handoff_id" field to the value that was provided on create.
+func (u *MessageUpsertBulk) UpdateHandoffID() *MessageUpsertBulk {
+	return u.Update(func(s *MessageUpsert) {
+		s.UpdateHandoffID()
+	})
+}
+
+// SetTools sets the "tools" field.
+func (u *MessageUpsertBulk) SetTools(v string) *MessageUpsertBulk {
+	return u.Update(func(s *MessageUpsert) {
+		s.SetTools(v)
+	})
+}
+
+// UpdateTools sets the "tools" field to the value that was provided on create.
+func (u *MessageUpsertBulk) UpdateTools() *MessageUpsertBulk {
+	return u.Update(func(s *MessageUpsert) {
+		s.UpdateTools()
 	})
 }
 

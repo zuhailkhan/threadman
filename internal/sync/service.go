@@ -31,70 +31,86 @@ func New(providers []ports.ThreadProvider, repo ports.ThreadRepository) *Service
 
 func (s *Service) SyncAll(ctx context.Context) []SyncResult {
 	results := make([]SyncResult, 0, len(s.providers))
-
 	for _, p := range s.providers {
-		result := SyncResult{Provider: p.Name()}
-
-		threads, err := p.DiscoverThreads(ctx)
-		if err != nil {
-			if errors.Is(err, ports.ErrSourceUnavailable) {
-				result.Unavailable = true
-				results = append(results, result)
-				continue
-			}
-			result.Err = err
-			results = append(results, result)
-			continue
-		}
-		result.ThreadsFound = len(threads)
-
-		discoveredIDs := make([]string, 0, len(threads))
-		for _, t := range threads {
-			discoveredIDs = append(discoveredIDs, t.ID)
-			full, err := p.GetThreadDetails(ctx, t)
-			if err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", t.OriginalID, err))
-				continue
-			}
-			if !hasUserMessage(full.Messages) {
-				result.Skipped++
-				continue
-			}
-			full.LastSyncedAt = time.Now()
-			if err := s.repo.UpsertThread(ctx, full); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("save %s: %v", t.OriginalID, err))
-				continue
-			}
-			result.ThreadsSaved++
-		}
-
-		// Finding nothing is not evidence that everything was deleted: session
-		// files that can't be read or recognised are skipped without an error, so
-		// pruning on an empty discovery could erase the provider's stored history.
-		if len(discoveredIDs) > 0 {
-			if err := s.repo.DeleteThreadsNotIn(ctx, p.Name(), discoveredIDs); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("prune stale threads: %v", err))
-			}
-		}
-
-		results = append(results, result)
+		results = append(results, s.syncProvider(ctx, p))
 	}
-
 	return results
 }
 
-func (s *Service) SyncProvider(ctx context.Context, name string) (SyncResult, bool) {
+// SyncProvider syncs one provider. ok is false when no provider has that name.
+func (s *Service) SyncProvider(ctx context.Context, name string) (result SyncResult, ok bool) {
 	for _, p := range s.providers {
 		if p.Name() == name {
-			results := s.SyncAll(ctx)
-			for _, r := range results {
-				if r.Provider == name {
-					return r, true
-				}
-			}
+			return s.syncProvider(ctx, p), true
 		}
 	}
 	return SyncResult{}, false
+}
+
+func (s *Service) syncProvider(ctx context.Context, p ports.ThreadProvider) SyncResult {
+	result := SyncResult{Provider: p.Name()}
+
+	threads, err := p.DiscoverThreads(ctx)
+	if err != nil {
+		if errors.Is(err, ports.ErrSourceUnavailable) {
+			result.Unavailable = true
+		} else {
+			result.Err = err
+		}
+		return result
+	}
+	result.ThreadsFound = len(threads)
+
+	discoveredIDs := make([]string, 0, len(threads))
+	for _, t := range threads {
+		discoveredIDs = append(discoveredIDs, t.ID)
+		full, err := p.GetThreadDetails(ctx, t)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", t.OriginalID, err))
+			continue
+		}
+		markHandoffs(&full)
+		if !hasUserMessage(full.Messages) {
+			result.Skipped++
+			continue
+		}
+		full.LastSyncedAt = time.Now()
+		if err := s.repo.UpsertThread(ctx, full); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("save %s: %v", t.OriginalID, err))
+			continue
+		}
+		result.ThreadsSaved++
+	}
+
+	// Sessions the tool no longer has are kept and flagged, never deleted.
+	// Finding nothing is not evidence that everything was deleted, though:
+	// session files that can't be read or recognised are skipped without an
+	// error, so an empty discovery would flag every thread for no reason.
+	if len(discoveredIDs) > 0 {
+		if err := s.repo.MarkMissingNotIn(ctx, p.Name(), discoveredIDs); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("flag missing sessions: %v", err))
+		}
+	}
+	return result
+}
+
+// markHandoffs finds the blocks threadman wrote into a session and files them
+// as handoffs instead of messages the user typed. A provider titles a session
+// after its first user message, which in a handed-off session is the block, so
+// that title is dropped and the stored one is kept.
+func markHandoffs(t *domain.Thread) {
+	for i, m := range t.Messages {
+		if m.Role != domain.RoleUser {
+			continue
+		}
+		if id, _, ok := domain.ParseHandoffMarker(m.Content); ok {
+			t.Messages[i].Kind = domain.KindHandoff
+			t.Messages[i].HandoffID = id
+		}
+	}
+	if domain.IsHandoffMarker(t.Title) {
+		t.Title = ""
+	}
 }
 
 func hasUserMessage(messages []domain.Message) bool {
@@ -110,6 +126,8 @@ func (s *Service) ListThreads(ctx context.Context, provider string, includeArchi
 	return s.repo.ListThreads(ctx, provider, includeArchived)
 }
 
+// GetThread returns a thread read fresh from its tool. When the tool no longer
+// has the session, or can't read it, threadman's stored copy is returned.
 func (s *Service) GetThread(ctx context.Context, id string) (domain.Thread, error) {
 	threads, err := s.repo.ListThreads(ctx, "", true)
 	if err != nil {
@@ -117,9 +135,20 @@ func (s *Service) GetThread(ctx context.Context, id string) (domain.Thread, erro
 	}
 	for _, t := range threads {
 		if t.ID == id {
+			if t.SourceMissing {
+				return t, nil
+			}
 			for _, p := range s.providers {
 				if p.Name() == t.Provider {
-					return p.GetThreadDetails(ctx, t)
+					full, err := p.GetThreadDetails(ctx, t)
+					if err != nil {
+						return t, nil
+					}
+					markHandoffs(&full)
+					if full.Title == "" {
+						full.Title = t.Title
+					}
+					return full, nil
 				}
 			}
 			return t, nil
@@ -140,8 +169,12 @@ func (s *Service) ProviderNames() []string {
 	return names
 }
 
-func (s *Service) RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error {
-	return s.repo.RecordHandoff(ctx, source, targetProvider, targetOriginalID)
+func (s *Service) RecordHandoff(ctx context.Context, source domain.Thread, h domain.Handoff) error {
+	return s.repo.RecordHandoff(ctx, source, h)
+}
+
+func (s *Service) GetHandoff(ctx context.Context, id string) (domain.Handoff, error) {
+	return s.repo.GetHandoff(ctx, id)
 }
 
 func (s *Service) CountThreads(ctx context.Context) (int, error) {
@@ -161,6 +194,7 @@ func (s *Service) IngestFromHook(ctx context.Context, providerName string, paylo
 		if err != nil {
 			return err
 		}
+		markHandoffs(&thread)
 		if !hasUserMessage(thread.Messages) {
 			return nil
 		}
@@ -201,12 +235,15 @@ func (s *Service) DeleteThreadCopies(ctx context.Context, selected []domain.Thre
 	}
 
 	for _, t := range selected {
-		w, ok := writerByName[t.Provider]
-		if !ok {
-			return fmt.Errorf("no writer for provider: %s", t.Provider)
-		}
-		if err := w.DeleteThread(ctx, t); err != nil {
-			return fmt.Errorf("delete source for %s/%s: %w", t.Provider, t.OriginalID, err)
+		// A session its tool already removed only needs threadman's copy gone.
+		if !t.SourceMissing {
+			w, ok := writerByName[t.Provider]
+			if !ok {
+				return fmt.Errorf("no writer for provider: %s", t.Provider)
+			}
+			if err := w.DeleteThread(ctx, t); err != nil {
+				return fmt.Errorf("delete source for %s/%s: %w", t.Provider, t.OriginalID, err)
+			}
 		}
 
 		hash := computeDeleteHash(t)

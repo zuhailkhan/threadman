@@ -36,6 +36,8 @@ const (
 	FieldDeleted = "deleted"
 	// FieldDeletedHash holds the string denoting the deleted_hash field in the database.
 	FieldDeletedHash = "deleted_hash"
+	// FieldSourceMissing holds the string denoting the source_missing field in the database.
+	FieldSourceMissing = "source_missing"
 	// EdgeMessages holds the string denoting the messages edge name in mutations.
 	EdgeMessages = "messages"
 	// Table holds the table name of the thread in the database.
@@ -64,6 +66,7 @@ var Columns = []string{
 	FieldArchived,
 	FieldDeleted,
 	FieldDeletedHash,
+	FieldSourceMissing,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -87,6 +90,8 @@ var (
 	DefaultDeleted bool
 	// DefaultDeletedHash holds the default value on creation for the "deleted_hash" field.
 	DefaultDeletedHash string
+	// DefaultSourceMissing holds the default value on creation for the "source_missing" field.
+	DefaultSourceMissing bool
 )
 
 // OrderOption defines the ordering options for the Thread queries.
@@ -155,6 +160,11 @@ func ByDeleted(opts ...sql.OrderTermOption) OrderOption {
 // ByDeletedHash orders the results by the deleted_hash field.
 func ByDeletedHash(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDeletedHash, opts...).ToFunc()
+}
+
+// BySourceMissing orders the results by the source_missing field.
+func BySourceMissing(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSourceMissing, opts...).ToFunc()
 }
 
 // ByMessagesCount orders the results by messages count.

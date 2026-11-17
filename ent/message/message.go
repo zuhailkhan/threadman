@@ -18,6 +18,12 @@ const (
 	FieldContent = "content"
 	// FieldTimestamp holds the string denoting the timestamp field in the database.
 	FieldTimestamp = "timestamp"
+	// FieldKind holds the string denoting the kind field in the database.
+	FieldKind = "kind"
+	// FieldHandoffID holds the string denoting the handoff_id field in the database.
+	FieldHandoffID = "handoff_id"
+	// FieldTools holds the string denoting the tools field in the database.
+	FieldTools = "tools"
 	// EdgeThread holds the string denoting the thread edge name in mutations.
 	EdgeThread = "thread"
 	// Table holds the table name of the message in the database.
@@ -37,6 +43,9 @@ var Columns = []string{
 	FieldRole,
 	FieldContent,
 	FieldTimestamp,
+	FieldKind,
+	FieldHandoffID,
+	FieldTools,
 }
 
 // ForeignKeys holds the SQL foreign-keys that are owned by the "messages"
@@ -60,6 +69,15 @@ func ValidColumn(column string) bool {
 	return false
 }
 
+var (
+	// DefaultKind holds the default value on creation for the "kind" field.
+	DefaultKind string
+	// DefaultHandoffID holds the default value on creation for the "handoff_id" field.
+	DefaultHandoffID string
+	// DefaultTools holds the default value on creation for the "tools" field.
+	DefaultTools string
+)
+
 // OrderOption defines the ordering options for the Message queries.
 type OrderOption func(*sql.Selector)
 
@@ -81,6 +99,21 @@ func ByContent(opts ...sql.OrderTermOption) OrderOption {
 // ByTimestamp orders the results by the timestamp field.
 func ByTimestamp(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldTimestamp, opts...).ToFunc()
+}
+
+// ByKind orders the results by the kind field.
+func ByKind(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldKind, opts...).ToFunc()
+}
+
+// ByHandoffID orders the results by the handoff_id field.
+func ByHandoffID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldHandoffID, opts...).ToFunc()
+}
+
+// ByTools orders the results by the tools field.
+func ByTools(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTools, opts...).ToFunc()
 }
 
 // ByThreadField orders the results by thread field.

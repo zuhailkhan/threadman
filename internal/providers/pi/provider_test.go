@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/ports"
 )
 
@@ -115,5 +116,30 @@ func TestIngestFromHook(t *testing.T) {
 
 	if _, err := p.IngestFromHook(context.Background(), ports.HookPayload{}); err == nil {
 		t.Error("want an error for an empty payload")
+	}
+}
+
+func TestToolCallsWithResults(t *testing.T) {
+	p := writeSession(t,
+		header,
+		`{"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"list files"}}`,
+		`{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hmm"},{"type":"toolCall","id":"call_1","name":"bash","arguments":{"command":"ls -R"}}]}}`,
+		`{"type":"message","id":"r1","parentId":"a1","timestamp":"2026-01-01T00:00:03.000Z","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","isError":false,"content":[{"type":"text","text":"README.md\ngo.mod"}]}}`,
+		`{"type":"message","id":"a2","parentId":"r1","timestamp":"2026-01-01T00:00:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Two files."},{"type":"toolCall","id":"call_2","name":"read","arguments":{"path":"nope"}}]}}`,
+		`{"type":"message","id":"r2","parentId":"a2","timestamp":"2026-01-01T00:00:05.000Z","message":{"role":"toolResult","toolCallId":"call_2","toolName":"read","isError":true,"content":[{"type":"text","text":"not found"}]}}`,
+	)
+	threads, _ := p.DiscoverThreads(context.Background())
+	full, err := p.GetThreadDetails(context.Background(), threads[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Messages) != 3 {
+		t.Fatalf("got %d messages, want 3: %+v", len(full.Messages), full.Messages)
+	}
+	if got := full.Messages[1].Tools; len(got) != 1 || got[0] != (domain.ToolCall{Name: "bash", Input: "ls -R", Output: "README.md\ngo.mod"}) {
+		t.Errorf("tool-only turn: %+v", got)
+	}
+	if m := full.Messages[2]; m.Content != "Two files." || len(m.Tools) != 1 || !m.Tools[0].Error || m.Tools[0].Output != "not found" {
+		t.Errorf("turn with text and a failed call: %+v", m)
 	}
 }

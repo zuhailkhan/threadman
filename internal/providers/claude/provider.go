@@ -64,8 +64,11 @@ type assistantMessage struct {
 }
 
 type contentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type  string          `json:"type"`
+	Text  string          `json:"text"`
+	ID    string          `json:"id"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
 }
 
 type aiTitleEntry struct {
@@ -190,6 +193,10 @@ func (p *Provider) parseMetadata(path string) (domain.Thread, error) {
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		return domain.Thread{}, fmt.Errorf("read %s: %w", path, err)
+	}
+
 	title := customTitle
 	if title == "" {
 		title = aiTitle
@@ -226,12 +233,16 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 	}
 	defer file.Close()
 
-	type msgEntry struct {
-		msg   domain.Message
-		order int
-	}
-	seen := make(map[string]msgEntry)
-	order := 0
+	var messages []domain.Message
+	// Claude Code writes one assistant message as several entries sharing
+	// its message ID, one per content block, so entries are merged by it.
+	byID := map[string]int{}
+	// Entries already read, in case one is written twice.
+	read := map[string]bool{}
+	// Where each tool call is, so its result can be attached when it comes
+	// back in a later user entry.
+	type toolRef struct{ msg, tool int }
+	tools := map[string]toolRef{}
 
 	scanner := newScanner(file)
 	for scanner.Scan() {
@@ -242,13 +253,26 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 			continue
 		}
 
-		var msg domain.Message
 		switch base.Type {
 		case "user":
 			var e userEntry
 			if err := json.Unmarshal(line, &e); err != nil {
 				continue
 			}
+			if e.UUID != "" {
+				if read[e.UUID] {
+					continue
+				}
+				read[e.UUID] = true
+			}
+			for _, r := range toolResults(e.Message.Content) {
+				if ref, ok := tools[r.id]; ok {
+					call := &messages[ref.msg].Tools[ref.tool]
+					call.Output = domain.Shorten(r.text, domain.MaxToolOutput)
+					call.Error = r.isError
+				}
+			}
+
 			content := extractUserContent(e.Message.Content)
 			if content == "" {
 				continue
@@ -260,40 +284,106 @@ func (p *Provider) GetThreadDetails(ctx context.Context, t domain.Thread) (domai
 				continue
 			}
 			ts, _ := time.Parse(time.RFC3339, e.Timestamp)
-			msg = domain.Message{ID: e.UUID, Role: role, Content: content, Timestamp: ts}
+			byID[e.UUID] = len(messages)
+			messages = append(messages, domain.Message{ID: e.UUID, Role: role, Content: content, Timestamp: ts})
 
 		case "assistant":
 			var e assistantEntry
 			if err := json.Unmarshal(line, &e); err != nil {
 				continue
 			}
+			if e.UUID != "" {
+				if read[e.UUID] {
+					continue
+				}
+				read[e.UUID] = true
+			}
 			content := extractAssistantContent(e.Message.Content)
-			if content == "" {
+			var calls []domain.ToolCall
+			var callIDs []string
+			for _, b := range e.Message.Content {
+				if b.Type == "tool_use" {
+					calls = append(calls, domain.ToolCall{Name: b.Name, Input: domain.ToolInput(b.Input)})
+					callIDs = append(callIDs, b.ID)
+				}
+			}
+			if content == "" && len(calls) == 0 {
 				continue
 			}
-			ts, _ := time.Parse(time.RFC3339, e.Timestamp)
-			msg = domain.Message{ID: e.Message.ID, Role: domain.RoleAssistant, Content: content, Timestamp: ts}
 
-		default:
-			continue
+			pos, ok := byID[e.Message.ID]
+			if !ok {
+				ts, _ := time.Parse(time.RFC3339, e.Timestamp)
+				pos = len(messages)
+				byID[e.Message.ID] = pos
+				messages = append(messages, domain.Message{ID: e.Message.ID, Role: domain.RoleAssistant, Timestamp: ts})
+			}
+			m := &messages[pos]
+			if content != "" {
+				if m.Content != "" {
+					m.Content += "\n\n"
+				}
+				m.Content += content
+			}
+			for i, call := range calls {
+				tools[callIDs[i]] = toolRef{msg: pos, tool: len(m.Tools)}
+				m.Tools = append(m.Tools, call)
+			}
 		}
-
-		e, exists := seen[msg.ID]
-		if !exists {
-			e.order = order
-			order++
-		}
-		e.msg = msg
-		seen[msg.ID] = e
 	}
 
-	messages := make([]domain.Message, len(seen))
-	for _, e := range seen {
-		messages[e.order] = e.msg
+	// A line that can't be read ends the scan early; storing what was read
+	// so far would silently cut the conversation short.
+	if err := scanner.Err(); err != nil {
+		return t, fmt.Errorf("read %s: %w", t.SourceFilePath, err)
 	}
 
 	t.Messages = messages
 	return t, nil
+}
+
+type toolResult struct {
+	id      string
+	text    string
+	isError bool
+}
+
+// toolResults finds the tool_result blocks in a user entry. Their content is
+// either a string or a list of blocks, of which the text ones are kept.
+func toolResults(raw any) []toolResult {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	var out []toolResult
+	for _, item := range items {
+		b, ok := item.(map[string]any)
+		if !ok || b["type"] != "tool_result" {
+			continue
+		}
+		id, _ := b["tool_use_id"].(string)
+		isError, _ := b["is_error"].(bool)
+		out = append(out, toolResult{id: id, text: resultText(b["content"]), isError: isError})
+	}
+	return out
+}
+
+func resultText(v any) string {
+	switch c := v.(type) {
+	case string:
+		return c
+	case []any:
+		var parts []string
+		for _, item := range c {
+			if b, ok := item.(map[string]any); ok {
+				if text, ok := b["text"].(string); ok {
+					parts = append(parts, text)
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return ""
 }
 
 func extractUserContent(raw any) string {
@@ -373,16 +463,21 @@ func (p *Provider) findSessionFile(sessionID string) (string, error) {
 	return "", fmt.Errorf("session file not found for session_id: %s", sessionID)
 }
 
+// maxLine is the longest session line read. A line holding a pasted image
+// or a large tool result can run to many megabytes.
+const maxLine = 64 * 1024 * 1024
+
 func newScanner(f *os.File) *bufio.Scanner {
 	s := bufio.NewScanner(f)
-	s.Buffer(make([]byte, 2*1024*1024), 2*1024*1024)
+	s.Buffer(make([]byte, 64*1024), maxLine)
 	return s
 }
 
 func truncate(s string, n int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-3] + "..."
+	return string(r[:n-3]) + "..."
 }

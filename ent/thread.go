@@ -41,6 +41,8 @@ type Thread struct {
 	Deleted bool `json:"deleted,omitempty"`
 	// DeletedHash holds the value of the "deleted_hash" field.
 	DeletedHash string `json:"deleted_hash,omitempty"`
+	// SourceMissing holds the value of the "source_missing" field.
+	SourceMissing bool `json:"source_missing,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the ThreadQuery when eager-loading is set.
 	Edges        ThreadEdges `json:"edges"`
@@ -70,7 +72,7 @@ func (*Thread) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case thread.FieldArchived, thread.FieldDeleted:
+		case thread.FieldArchived, thread.FieldDeleted, thread.FieldSourceMissing:
 			values[i] = new(sql.NullBool)
 		case thread.FieldID, thread.FieldProvider, thread.FieldOriginalID, thread.FieldTitle, thread.FieldWorkspacePath, thread.FieldSourceFilePath, thread.FieldCanonicalID, thread.FieldCustomTitle, thread.FieldDeletedHash:
 			values[i] = new(sql.NullString)
@@ -169,6 +171,12 @@ func (_m *Thread) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.DeletedHash = value.String
 			}
+		case thread.FieldSourceMissing:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field source_missing", values[i])
+			} else if value.Valid {
+				_m.SourceMissing = value.Bool
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -245,6 +253,9 @@ func (_m *Thread) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("deleted_hash=")
 	builder.WriteString(_m.DeletedHash)
+	builder.WriteString(", ")
+	builder.WriteString("source_missing=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SourceMissing))
 	builder.WriteByte(')')
 	return builder.String()
 }

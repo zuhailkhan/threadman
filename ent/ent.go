@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"github.com/zuhailkhan/threadman/ent/handoff"
 	"github.com/zuhailkhan/threadman/ent/message"
 	"github.com/zuhailkhan/threadman/ent/thread"
 )
@@ -74,6 +75,7 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
+			handoff.Table: handoff.ValidColumn,
 			message.Table: message.ValidColumn,
 			thread.Table:  thread.ValidColumn,
 		})

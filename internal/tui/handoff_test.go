@@ -8,14 +8,26 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/zuhailkhan/threadman/internal/conversation"
 	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/handoff"
 	"github.com/zuhailkhan/threadman/internal/ports"
 )
 
 type fakeWriter struct {
-	name    string
-	written []domain.Thread
+	name     string
+	written  []domain.Thread
+	appended []appendCall
+}
+
+type appendCall struct {
+	target   domain.Thread
+	messages []domain.Message
+}
+
+func (w *fakeWriter) AppendMessages(ctx context.Context, target domain.Thread, messages []domain.Message) error {
+	w.appended = append(w.appended, appendCall{target, messages})
+	return nil
 }
 
 func (w *fakeWriter) Name() string { return w.name }
@@ -77,6 +89,16 @@ func TestHandoffModeDialogWithoutLLM(t *testing.T) {
 	if m.state != stateHandoffPicker {
 		t.Fatalf("state after h = %v", m.state)
 	}
+	// Claude already holds the whole thread, so the cursor starts on pi.
+	view := m.View()
+	for _, want := range []string{"up to date", "new session"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("picker missing %q:\n%s", want, view)
+		}
+	}
+	if m.handoffTargets[m.handoffCursor].writer != target {
+		t.Fatalf("cursor on %s, want pi", m.handoffTargets[m.handoffCursor].writer.Name())
+	}
 
 	m, check := press(t, m, "enter")
 	if m.state != stateHandoffMode || !m.llmChecking {
@@ -88,7 +110,7 @@ func TestHandoffModeDialogWithoutLLM(t *testing.T) {
 
 	next, _ := m.Update(check())
 	m = asModel(next)
-	view := m.View()
+	view = m.View()
 	for _, want := range []string{"Detailed summary", "Light summary", "Full transcript", "not configured", "press L"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("mode dialog missing %q:\n%s", want, view)
@@ -107,13 +129,45 @@ func TestHandoffModeDialogWithoutLLM(t *testing.T) {
 	if m.state != stateHandoffWorking {
 		t.Fatalf("state after choosing a mode = %v", m.state)
 	}
-	next, _ = m.Update(write())
+	written := write()
+	next, record := m.Update(written)
 	m = asModel(next)
 	if m.state != stateHandoffConfirm || m.handoffSessionID != "new-session" {
 		t.Fatalf("state after write = %v, session %q", m.state, m.handoffSessionID)
 	}
-	if len(target.written) != 1 || len(target.written[0].Messages) != 1 || target.written[0].Messages[0].Content != "hello" {
-		t.Fatalf("full transcript not written as-is: %+v", target.written)
+	if record == nil {
+		t.Error("the handoff was not recorded")
+	}
+
+	// The transcript goes over as one attributed block.
+	if len(target.written) != 1 || len(target.written[0].Messages) != 1 {
+		t.Fatalf("want one session holding one block, got %+v", target.written)
+	}
+	block := target.written[0].Messages[0]
+	if block.Kind != domain.KindHandoff || block.Role != domain.RoleUser || !strings.Contains(block.Content, "[User]\nhello") {
+		t.Fatalf("full transcript not written as a handoff block: %+v", block)
+	}
+
+	// The record names the session it was written to.
+	h := written.(handoffWrittenMsg).record
+	if h.ID != block.HandoffID || h.TargetProvider != "pi" || h.TargetOriginalID != "new-session" || h.Mode != "full" {
+		t.Errorf("record = %+v", h)
+	}
+}
+
+// A received handoff block shows as a divider, not as something the user typed.
+func TestRenderThreadShowsHandoffAsDivider(t *testing.T) {
+	block := domain.HandoffMarker("h-1", "from Claude Code · full transcript · 4 messages") + "\n\n[User]\nsecret detail"
+	out := renderThread(domain.Thread{Provider: "pi", Messages: []domain.Message{
+		{Role: domain.RoleUser, Content: block, Kind: domain.KindHandoff, HandoffID: "h-1"},
+		{Role: domain.RoleUser, Content: "now add tests"},
+	}})
+
+	if !strings.Contains(out, "handed off to pi · from Claude Code · full transcript · 4 messages") {
+		t.Errorf("divider missing:\n%s", out)
+	}
+	if strings.Contains(out, "secret detail") || strings.Count(out, "You:") != 1 {
+		t.Errorf("the block was rendered as a message:\n%s", out)
 	}
 }
 
@@ -125,6 +179,7 @@ func TestHandoffCancel(t *testing.T) {
 		height:        30,
 		thread:        domain.Thread{Messages: []domain.Message{{Role: domain.RoleUser, Content: "hello"}}},
 		handoffTarget: target,
+		handoffChoice: handoffTarget{writer: target, missed: []conversation.Entry{{Provider: "claude", Message: domain.Message{Role: domain.RoleUser, Content: "hello"}}}},
 		summarizer:    handoff.NewSummarizer(filepath.Join(t.TempDir(), "config.json")),
 	}
 	m.handoffModeCursor = m.firstUsableMode()
