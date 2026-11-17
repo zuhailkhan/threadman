@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,8 +28,8 @@ func TestResizeKeepsReaderContent(t *testing.T) {
 	if v := m.viewport.View(); !strings.Contains(v, "o5 tests added") {
 		t.Errorf("reader is empty after a resize:\n%s", v)
 	}
-	if m.viewport.Width != 120 {
-		t.Errorf("viewport width %d, want 120", m.viewport.Width)
+	if m.viewport.Width != m.readerWidth() {
+		t.Errorf("viewport width %d, want %d", m.viewport.Width, m.readerWidth())
 	}
 }
 
@@ -70,11 +71,12 @@ func TestListRowTruncatesByCharacter(t *testing.T) {
 		Title:         strings.Repeat("修正", 40),
 		WorkspacePath: "/work/" + strings.Repeat("é", 30),
 	}}
-	row := renderListRow(1, g, 80)
+	m := Model{width: 80, height: 30, filteredGroups: []ThreadGroup{g}}
+	row := strings.Join(m.listRow(0, 40, time.Now()), "\n")
 	if !utf8.ValidString(row) {
 		t.Errorf("row has a broken character: %q", row)
 	}
-	if !strings.Contains(row, "...") {
+	if !strings.Contains(row, "…") {
 		t.Errorf("long title was not shortened: %q", row)
 	}
 	if got := truncateRunes("héllo wörld", 8); got != "héllo..." {

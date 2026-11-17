@@ -1,87 +1,92 @@
 package tui
 
 import (
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
+// The palette adapts to the terminal's background, so the same screens read
+// on light and dark themes.
+type adaptive = lipgloss.AdaptiveColor
+
 var (
-	colorClaude      = lipgloss.Color("#4A90E2")
-	colorGemini      = lipgloss.Color("#00BFA5")
-	colorOpenCode    = lipgloss.Color("#9B59B6")
-	colorPi          = lipgloss.Color("#E67E22")
-	colorAntigravity = lipgloss.Color("#E84393")
-	colorCodex       = lipgloss.Color("#10A37F")
-	colorDefault     = lipgloss.Color("#888888")
-	colorAmber       = lipgloss.Color("#F5A623")
-	colorGreen       = lipgloss.Color("#7ED321")
-	colorDim         = lipgloss.Color("#555555")
-	colorSelected    = lipgloss.Color("#2A2A2A")
-
-	styleTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF"))
-	styleHint   = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	styleSep    = lipgloss.NewStyle().Foreground(colorDim)
-	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#AAAAAA"))
-
-	styleSelected = lipgloss.NewStyle().
-			Background(colorSelected).
-			Bold(true)
-
-	styleCursor = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F5A623")).
-			Bold(true)
-
-	styleStatus = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1A1A1A")).
-			Foreground(lipgloss.Color("#AAAAAA")).
-			Padding(0, 1)
-
-	styleYou       = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
-	styleAssistant = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
-	styleArchived  = lipgloss.NewStyle().Foreground(colorDim)
-	styleWarn      = lipgloss.NewStyle().Foreground(colorAmber)
+	colorFg       = adaptive{Light: "#1F2328", Dark: "#D7DCE3"}
+	colorDim      = adaptive{Light: "#5F6670", Dark: "#8A929E"}
+	colorFaint    = adaptive{Light: "#A3A8AF", Dark: "#4C535E"}
+	colorAccent   = adaptive{Light: "#B7791F", Dark: "#F2B544"}
+	colorOnAccent = adaptive{Light: "#FAFAF7", Dark: "#0F1115"}
+	colorAI       = adaptive{Light: "#2F7D4F", Dark: "#8CCB9B"}
+	colorErr      = adaptive{Light: "#C0392B", Dark: "#F07167"}
+	colorSel      = adaptive{Light: "#E4E2DA", Dark: "#1F2530"}
+	colorCode     = adaptive{Light: "#ECEBE5", Dark: "#1A1F27"}
+	colorMatch    = adaptive{Light: "#F6E2A8", Dark: "#4A3A12"}
 )
 
-func providerIcon(name string) string {
-	switch name {
-	case "claude":
-		return "C"
-	case "gemini":
-		return "G"
-	case "opencode":
-		return "O"
-	case "pi":
-		return "P"
-	case "antigravity":
-		return "A"
-	case "codex":
-		return "X"
-	default:
-		if len(name) > 0 {
-			return strings.ToUpper(name[:1])
-		}
-		return "?"
+var (
+	styleFg     = lipgloss.NewStyle().Foreground(colorFg)
+	styleBold   = lipgloss.NewStyle().Foreground(colorFg).Bold(true)
+	styleHint   = lipgloss.NewStyle().Foreground(colorDim)
+	styleFaint  = lipgloss.NewStyle().Foreground(colorFaint)
+	styleSep    = styleFaint
+	styleAccent = lipgloss.NewStyle().Foreground(colorAccent)
+	styleCursor = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleBrand  = lipgloss.NewStyle().Foreground(colorOnAccent).Background(colorAccent).Bold(true)
+	styleKey    = lipgloss.NewStyle().Foreground(colorFg).Background(colorSel)
+	styleYou    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleAI     = lipgloss.NewStyle().Foreground(colorAI).Bold(true)
+	styleOK     = lipgloss.NewStyle().Foreground(colorAI)
+	styleErr    = lipgloss.NewStyle().Foreground(colorErr)
+	styleWarn   = lipgloss.NewStyle().Foreground(colorAccent)
+	styleCode   = lipgloss.NewStyle().Foreground(colorFg).Background(colorCode)
+	styleMatch  = lipgloss.NewStyle().Foreground(colorFg).Background(colorMatch)
+	styleTab    = lipgloss.NewStyle().Foreground(colorFg).Bold(true).Underline(true)
+	// styleArchived dims a tool whose sessions were all deleted.
+	styleArchived = styleFaint
+)
+
+// providerLook is how a provider is drawn: a plain Unicode icon that works in
+// any terminal, an optional Nerd Font glyph, and a colour.
+type providerLook struct {
+	icon  string
+	nerd  string
+	color adaptive
+}
+
+var providerLooks = map[string]providerLook{
+	"claude":      {icon: "✻", nerd: "\uec82", color: adaptive{Light: "#C2573A", Dark: "#E58A6B"}},     // cod-claude
+	"opencode":    {icon: "▣", nerd: "\U000F0169", color: adaptive{Light: "#7354D6", Dark: "#A48BF0"}}, // md-code_braces
+	"pi":          {icon: "π", nerd: "\U000F03FF", color: adaptive{Light: "#1B7F93", Dark: "#4CC3D9"}}, // md-pi
+	"gemini":      {icon: "✦", nerd: "\U000F0AE2", color: adaptive{Light: "#2F6FD0", Dark: "#6AA6F0"}}, // md-star_four_points
+	"antigravity": {icon: "▲", color: adaptive{Light: "#B83280", Dark: "#E879B9"}},
+	"codex":       {icon: "◎", nerd: "\uec81", color: adaptive{Light: "#0E8A5F", Dark: "#34C38F"}}, // cod-openai
+}
+
+// A provider threadman has no look for yet.
+var unknownLook = providerLook{icon: "◆", color: adaptive{Light: "#5F6670", Dark: "#8A929E"}}
+
+// nerdIcons switches provider icons to Nerd Font glyphs. A terminal can't
+// report its font, so this is opt-in.
+var nerdIcons = strings.EqualFold(os.Getenv("THREADMAN_ICONS"), "nerd") || os.Getenv("NERD_FONT") == "1"
+
+func lookOf(name string) providerLook {
+	if l, ok := providerLooks[name]; ok {
+		return l
 	}
+	return unknownLook
+}
+
+// providerIcon is the provider's icon. A Nerd Font glyph is drawn about two
+// cells wide, so it carries a space to draw into.
+func providerIcon(name string) string {
+	l := lookOf(name)
+	if nerdIcons && l.nerd != "" {
+		return l.nerd + " "
+	}
+	return l.icon
 }
 
 func providerStyle(name string) lipgloss.Style {
-	var color lipgloss.Color
-	switch name {
-	case "claude":
-		color = colorClaude
-	case "gemini":
-		color = colorGemini
-	case "opencode":
-		color = colorOpenCode
-	case "pi":
-		color = colorPi
-	case "antigravity":
-		color = colorAntigravity
-	case "codex":
-		color = colorCodex
-	default:
-		color = colorDefault
-	}
-	return lipgloss.NewStyle().Foreground(color).Bold(true)
+	return lipgloss.NewStyle().Foreground(lookOf(name).color)
 }

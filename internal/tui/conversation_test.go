@@ -215,7 +215,7 @@ func TestReaderShowsToolCallsOnOneLine(t *testing.T) {
 			{Name: "Read", Input: "a.go", Error: true},
 		}},
 	}})
-	for _, want := range []string{"Assistant:", "▸ Bash  go test ./...", "▸ Read  a.go  (failed)"} {
+	for _, want := range []string{"Assistant", "▸ Bash  go test ./...", "▸ Read  a.go  (failed)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("reader missing %q:\n%s", want, out)
 		}
@@ -267,7 +267,7 @@ func TestModeDialogRecommendsSummaryForLargeTranscript(t *testing.T) {
 
 	m := modeDialog(t, large, false)
 	view := m.View()
-	for _, want := range []string{"Full transcript  ~120k tokens", "~120k tokens, more than many", "A summary is", "press L to set one up"} {
+	for _, want := range []string{"Full transcript", "~120k tokens", "~120k tokens, more than many", "A summary is", "press L to set one up"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("without an LLM, dialog missing %q:\n%s", want, view)
 		}

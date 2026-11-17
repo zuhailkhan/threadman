@@ -166,7 +166,7 @@ func TestRenderThreadShowsHandoffAsDivider(t *testing.T) {
 	if !strings.Contains(out, "handed off to pi · from Claude Code · full transcript · 4 messages") {
 		t.Errorf("divider missing:\n%s", out)
 	}
-	if strings.Contains(out, "secret detail") || strings.Count(out, "You:") != 1 {
+	if strings.Contains(out, "secret detail") || strings.Count(out, "You") != 1 {
 		t.Errorf("the block was rendered as a message:\n%s", out)
 	}
 }
