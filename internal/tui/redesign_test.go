@@ -197,3 +197,32 @@ func TestReaderJumpsBetweenPrompts(t *testing.T) {
 		t.Errorf("[ went to line %d, want the top", m.viewport.YOffset)
 	}
 }
+
+// A session a handoff created is titled from its block's marker line; the
+// list names it by its first prompt instead, or by what the block carries.
+func TestHandoffSessionTitle(t *testing.T) {
+	marker := domain.HandoffMarker("c6fcaae5", "from OpenCode · full transcript · 3 messages")
+	withPrompt := domain.Thread{Title: marker, Messages: []domain.Message{
+		{Role: domain.RoleUser, Content: marker + "\n\n[User]\nhi"},
+		{Role: domain.RoleAssistant, Content: "ok"},
+		{Role: domain.RoleUser, Content: "what did the other assistant run?"},
+	}}
+	if got := displayTitle(withPrompt); got != "what did the other assistant run?" {
+		t.Errorf("with a prompt: %q", got)
+	}
+	blockOnly := domain.Thread{Title: marker, Messages: []domain.Message{{Role: domain.RoleUser, Content: marker, Kind: domain.KindHandoff}}}
+	if got := displayTitle(blockOnly); got != "Handoff from OpenCode · full transcript · 3 messages" {
+		t.Errorf("block only: %q", got)
+	}
+	renamed := withPrompt
+	renamed.CustomTitle = "mine"
+	if got := displayTitle(renamed); got != "mine" {
+		t.Errorf("a custom title wins: %q", got)
+	}
+}
+
+func TestCountsArePlural(t *testing.T) {
+	if plural(1, "msg") != "1 msg" || plural(2, "msg") != "2 msgs" || plural(0, "thread") != "0 threads" {
+		t.Error("plural")
+	}
+}

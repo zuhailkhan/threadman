@@ -20,11 +20,51 @@ func displayTitle(t domain.Thread) string {
 	switch {
 	case t.CustomTitle != "":
 		return t.CustomTitle
+	case domain.IsHandoffMarker(t.Title):
+		return handoffTitle(t)
 	case t.Title != "":
 		return t.Title
 	default:
 		return "(untitled)"
 	}
+}
+
+// handoffTitle names a session that a handoff created, whose own title is
+// the block's marker line: its first prompt after the block, or else what
+// the block says it carries.
+func handoffTitle(t domain.Thread) string {
+	// Sessions synced before blocks were recognised don't mark the block as
+	// one, so its marker line is checked as well as its kind.
+	for _, m := range t.Messages {
+		if m.Kind == domain.KindHandoff || m.Role != domain.RoleUser {
+			continue
+		}
+		if l := firstLine(m.Content); l != "" && !domain.IsHandoffMarker(l) {
+			return l
+		}
+	}
+	for _, s := range append([]string{t.Title}, messageContents(t)...) {
+		if _, detail, ok := domain.ParseHandoffMarker(s); ok && detail != "" {
+			return "Handoff " + detail
+		}
+	}
+	return "Handoff"
+}
+
+func messageContents(t domain.Thread) []string {
+	out := make([]string, len(t.Messages))
+	for i, m := range t.Messages {
+		out[i] = m.Content
+	}
+	return out
+}
+
+// plural is n with the noun, made plural when n isn't 1.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // groupActivity is when a conversation was last active in any of its tools.
@@ -366,11 +406,7 @@ func (m Model) viewHeader() string {
 	if m.showArchived {
 		right.add(styleFaint, "archived shown · ")
 	}
-	noun := "threads"
-	if len(m.filteredGroups) == 1 {
-		noun = "thread"
-	}
-	right.add(styleFaint, fmt.Sprintf("%d %s", len(m.filteredGroups), noun)).space(1)
+	right.add(styleFaint, plural(len(m.filteredGroups), "thread")).space(1)
 
 	tab("", "All", len(m.groups))
 	tabs := m.toolTabs()
@@ -566,7 +602,7 @@ func (m Model) listRow(i, width int, now time.Time) []string {
 	if g.Primary.WorkspacePath == "" {
 		meta = "no workspace"
 	}
-	parts := []string{meta, fmt.Sprintf("%d msgs", total)}
+	parts := []string{meta, plural(total, "msg")}
 	if len(groupTools(g)) > 1 {
 		parts = append(parts, "handed off")
 	}
