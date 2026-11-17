@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/zuhailkhan/threadman/internal/llm"
 )
 
@@ -189,7 +188,6 @@ func (m *Model) handleLLMSetupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) viewLLMSetup() string {
-	dialogWidth := 64
 	f := m.llmSetup
 	info := f.info()
 
@@ -197,7 +195,7 @@ func (m Model) viewLLMSetup() string {
 	value := func(field int, typed, placeholder string) string {
 		cursor := ""
 		if f.focus == field {
-			cursor = "_"
+			cursor = styleCursor.Render("▏")
 		}
 		if typed == "" {
 			return cursor + styleHint.Render(placeholder)
@@ -233,34 +231,21 @@ func (m Model) viewLLMSetup() string {
 		llmFieldAPIKey:   {"API key", value(llmFieldAPIKey, strings.Repeat("•", utf8.RuneCountInString(f.apiKey)), keyPlaceholder)},
 	}
 
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString("  LLM for handoff summaries\n")
-	inner.WriteString("\n")
+	pw := dialogWidth(64, m.width)
+	iw := pw - 4
+	lines := []string{styleHint.Render("Summarizes threads for handoffs and merges."), ""}
 	for _, field := range f.fields() {
-		marker := " "
-		if field == f.focus {
-			marker = styleCursor.Render("▶")
-		}
-		inner.WriteString(fmt.Sprintf("%s %-9s  %s\n", marker, rows[field][0], rows[field][1]))
+		r := choiceRow(field == f.focus)
+		r.add(styleFaint, fmt.Sprintf("%-10s", rows[field][0]))
+		lines = append(lines, r.String()+rows[field][1])
 	}
-	inner.WriteString("\n")
+	lines = append(lines, "")
 	if f.err != "" {
-		reason := lipgloss.NewStyle().Width(dialogWidth - 4).Render(f.err)
-		for _, line := range strings.Split(reason, "\n") {
-			inner.WriteString("  " + line + "\n")
-		}
-		inner.WriteString("\n")
+		lines = append(lines, wrapStyled(f.err, iw, styleErr)...)
+		lines = append(lines, "")
 	}
-	inner.WriteString(styleHint.Render("  ↑↓ field   ←→ provider   Enter save and check") + "\n")
-	inner.WriteString(styleHint.Render("  Esc cancel   Ctrl+D remove configuration") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+	lines = append(lines,
+		renderKeys([]keyHint{{"↑↓", "field"}, {"←→", "provider"}, {"↵", "save and check"}}).String(),
+		renderKeys([]keyHint{{"esc", "cancel"}, {"ctrl+d", "remove"}}).String())
+	return overlay(m.baseFor(f.returnTo), panel("LLM", styleCursor, colorFaint, lines, pw), m.width, m.height)
 }

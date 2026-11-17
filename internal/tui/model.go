@@ -12,7 +12,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/fsnotify/fsnotify"
 	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/handoff"
@@ -25,7 +24,6 @@ type appState int
 
 const (
 	stateOnboarding appState = iota
-	stateHookSetup
 	stateList
 	stateThread
 	stateSearch
@@ -129,6 +127,17 @@ type Model struct {
 	// merging is set from starting a merge until its result is dismissed,
 	// so the shared handoff dialogs return to the list.
 	merging bool
+	// toolFilter limits the list to one tool's conversations; "" shows all.
+	toolFilter string
+	// listTop is the first line of the list on screen.
+	listTop int
+	// help shows the full key list over the current screen.
+	help         bool
+	deleteCursor int
+	// onboardingHooks installs live-update hooks after the first import.
+	onboardingHooks bool
+	// prompts are where the user's messages start in the reader.
+	prompts []promptMark
 }
 
 type ThreadGroup struct {
@@ -173,31 +182,6 @@ func buildGroups(threads []domain.Thread) []ThreadGroup {
 	return groups
 }
 
-func providerIcons(g ThreadGroup) string {
-	seen := map[string]bool{g.Primary.Provider: true}
-	providers := []string{g.Primary.Provider}
-	live := map[string]bool{}
-	for _, m := range append([]domain.Thread{g.Primary}, g.Members...) {
-		if !seen[m.Provider] {
-			seen[m.Provider] = true
-			providers = append(providers, m.Provider)
-		}
-		if !m.SourceMissing {
-			live[m.Provider] = true
-		}
-	}
-	parts := make([]string, len(providers))
-	for i, p := range providers {
-		// A tool that no longer has any of the sessions shows dimmed.
-		style := providerStyle(p)
-		if !live[p] {
-			style = styleArchived
-		}
-		parts[i] = style.Render(providerIcon(p))
-	}
-	return "[" + strings.Join(parts, " ") + "]"
-}
-
 var providerLabels = domain.ProviderLabels
 
 func New(svc *syncsvc.Service, dbPath string, writers []ports.ThreadWriter, summarizer *handoff.Summarizer) Model {
@@ -211,7 +195,7 @@ func New(svc *syncsvc.Service, dbPath string, writers []ports.ThreadWriter, summ
 	}
 	ch := make(chan struct{}, 1)
 	go watchDB(dbPath, ch)
-	return Model{svc: svc, dbChanges: ch, onboardingProviders: providers, writers: writers, summarizer: summarizer, llmChecking: true}
+	return Model{svc: svc, dbChanges: ch, onboardingProviders: providers, writers: writers, summarizer: summarizer, llmChecking: true, onboardingHooks: true}
 }
 
 func watchDB(path string, ch chan<- struct{}) {
@@ -378,11 +362,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A new viewport starts empty, so the open conversation is laid out
 		// again and the reader stays where it was.
 		offset := m.viewport.YOffset
-		m.viewport = viewport.New(msg.Width, msg.Height-4)
+		m.viewport = viewport.New(m.readerWidth(), max(1, msg.Height-4))
 		if len(m.groupThreads) > 0 {
-			m.viewport.SetContent(renderConversation(m.groupThreads))
+			m.setReaderContent()
 			m.viewport.SetYOffset(offset)
 		}
+		m.keepCursorVisible()
 
 	case countMsg:
 		if msg == 0 {
@@ -396,6 +381,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.threads = msg
 		m.groups = buildGroups(m.threads)
 		m.applyFilter()
+		m.keepCursorVisible()
 		m.status = ""
 
 	case syncDoneMsg:
@@ -412,8 +398,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.status = strings.Join(parts, "  ")
 		if m.state == stateOnboarding {
-			m.state = stateHookSetup
-			return m, nil
+			if m.onboardingHooks {
+				m.status = "installing live-update hooks…"
+				return m, m.setupHooksCmd()
+			}
+			m.state = stateList
+			return m, m.loadThreads()
 		}
 		m.state = stateList
 		return m, m.loadThreads()
@@ -445,6 +435,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.threads = []domain.Thread(msg)
 		m.groups = buildGroups(m.threads)
 		m.applyFilter()
+		m.keepCursorVisible()
 		// A handoff can add a session to the open conversation.
 		if m.state == stateThread {
 			for _, g := range m.groups {
@@ -464,7 +455,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.thread = msg.primary
 		m.groupThreads = msg.members
-		m.viewport.SetContent(renderConversation(msg.members))
+		m.setReaderContent()
 		now := 0
 		for _, t := range msg.members {
 			now += len(t.Messages)
@@ -568,16 +559,20 @@ func (m Model) setupHooksCmd() tea.Cmd {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch m.state {
-	case stateHookSetup:
+	if m.help {
 		switch msg.String() {
-		case "enter", "y":
-			m.status = "configuring hooks..."
-			return m, m.setupHooksCmd()
-		case "esc", "n", "q":
-			m.state = stateList
-			return m, m.loadThreads()
+		case "esc", "?", "q":
+			m.help = false
+		case "ctrl+c":
+			return m, tea.Quit
 		}
+		return m, nil
+	}
+	if msg.String() == "?" && (m.state == stateList || m.state == stateThread) {
+		m.help = true
+		return m, nil
+	}
+	switch m.state {
 
 	case stateOnboarding:
 		switch msg.String() {
@@ -588,17 +583,23 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.onboardingCursor--
 			}
 		case "down", "j":
-			if m.onboardingCursor < len(m.onboardingProviders)-1 {
+			// The last line is the live-updates option.
+			if m.onboardingCursor < len(m.onboardingProviders) {
 				m.onboardingCursor++
 			}
 		case " ":
-			m.onboardingProviders[m.onboardingCursor].selected = !m.onboardingProviders[m.onboardingCursor].selected
+			if m.onboardingCursor == len(m.onboardingProviders) {
+				m.onboardingHooks = !m.onboardingHooks
+			} else {
+				m.onboardingProviders[m.onboardingCursor].selected = !m.onboardingProviders[m.onboardingCursor].selected
+			}
 		case "enter":
-			m.status = "importing..."
+			m.status = "importing…"
 			return m, m.syncSelected()
 		}
 
 	case stateList:
+		defer m.keepCursorVisible()
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -610,6 +611,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.filteredGroups)-1 {
 				m.cursor++
 			}
+		case "g", "home":
+			m.cursor = 0
+		case "G", "end":
+			m.cursor = max(0, len(m.filteredGroups)-1)
+		case "tab":
+			m.cycleToolFilter(1)
+		case "shift+tab":
+			m.cycleToolFilter(-1)
 		case "enter":
 			if len(m.filteredGroups) > 0 {
 				g := m.filteredGroups[m.cursor]
@@ -643,7 +652,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "m":
 			return m, m.startMerge()
 		case "esc":
-			m.mergeSelected = nil
+			switch {
+			case len(m.mergeSelected) > 0:
+				m.mergeSelected = nil
+			case m.query != "":
+				m.query = ""
+				m.applyFilter()
+			}
 		case "/":
 			m.state = stateSearch
 			m.query = ""
@@ -677,17 +692,27 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.deleteTargets = g.Members
 			m.deleteSelected = make([]bool, len(g.Members))
 			m.deleteDraft = ""
-			m.cursor = 0
+			m.deleteCursor = 0
 			m.state = stateDeletePicker
 		}
 
 	case stateSearch:
+		defer m.keepCursorVisible()
 		switch msg.String() {
+		case "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down":
+			if m.cursor < len(m.filteredGroups)-1 {
+				m.cursor++
+			}
 		case "esc":
 			m.state = stateList
 			m.query = ""
 			m.applyFilter()
 			m.cursor = 0
+			m.listTop = 0
 		case "enter":
 			m.state = stateList
 		case "backspace":
@@ -738,6 +763,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.handoffCursor = first
 			m.state = stateHandoffPicker
+		case "]":
+			m.jumpPrompt(1)
+		case "[":
+			m.jumpPrompt(-1)
+		case "g", "home":
+			m.viewport.GotoTop()
+		case "G", "end":
+			m.viewport.GotoBottom()
 		default:
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
@@ -880,22 +913,21 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "q":
 			m.state = stateList
-			m.cursor = 0
 		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
+			if m.deleteCursor > 0 {
+				m.deleteCursor--
 			}
 		case "down", "j":
-			if m.cursor < len(m.deleteTargets)-1 {
-				m.cursor++
+			if m.deleteCursor < len(m.deleteTargets)-1 {
+				m.deleteCursor++
 			}
 		case " ":
-			if len(m.deleteTargets) > 0 {
-				m.deleteSelected[m.cursor] = !m.deleteSelected[m.cursor]
+			if i := m.deleteCursor; i < len(m.deleteTargets) && m.deletable(m.deleteTargets[i]) {
+				m.deleteSelected[i] = !m.deleteSelected[i]
 			}
 		case "a":
-			for i := range m.deleteSelected {
-				m.deleteSelected[i] = true
+			for i, t := range m.deleteTargets {
+				m.deleteSelected[i] = m.deletable(t)
 			}
 		case "enter":
 			selected := m.selectedDeleteThreads()
@@ -917,13 +949,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.deleteTargets = nil
 			m.deleteSelected = nil
 			m.state = stateList
-			m.cursor = 0
 			return m, m.deleteThreadCopiesCmd(selected)
 		case "n", "N", "esc":
 			m.deleteTargets = nil
 			m.deleteSelected = nil
 			m.state = stateList
-			m.cursor = 0
 		}
 
 	case stateDeleteTyping:
@@ -933,7 +963,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.deleteDraft = ""
 			m.deleteTargets = nil
 			m.deleteSelected = nil
-			m.cursor = 0
 		case "enter":
 			if strings.ToLower(m.deleteDraft) == "delete thread" {
 				selected := m.selectedDeleteThreads()
@@ -941,7 +970,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.deleteTargets = nil
 				m.deleteSelected = nil
 				m.state = stateList
-				m.cursor = 0
 				return m, m.deleteThreadCopiesCmd(selected)
 			}
 		case "backspace":
@@ -1021,153 +1049,35 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) applyFilter() {
-	if m.query == "" {
-		m.filteredGroups = m.groups
-		return
-	}
-	q := strings.ToLower(m.query)
-	m.filteredGroups = make([]ThreadGroup, 0)
-	for _, g := range m.groups {
-		if strings.Contains(strings.ToLower(g.Primary.Title), q) {
-			m.filteredGroups = append(m.filteredGroups, g)
-			continue
-		}
-		for _, mem := range g.Members {
-			if strings.Contains(strings.ToLower(mem.Provider), q) {
-				m.filteredGroups = append(m.filteredGroups, g)
-				break
-			}
-		}
-	}
-}
-
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading..."
 	}
+	var v string
 	switch m.state {
 	case stateOnboarding:
 		return m.viewOnboarding()
-	case stateHookSetup:
-		return m.viewHookSetup()
 	case stateThread:
-		return m.viewThread()
-	case stateHandoffPicker:
-		return m.viewHandoffPicker()
-	case stateLLMSetup:
-		return m.viewLLMSetup()
-	case stateHandoffMode:
-		return m.viewHandoffMode()
-	case stateHandoffWorking:
-		return m.viewHandoffWorking()
-	case stateHandoffConfirm:
-		return m.viewHandoffConfirm()
-	case stateResumePicker:
-		return m.viewResumePicker()
-	case stateRename:
-		return m.viewRename()
-	case stateDeletePicker:
-		return m.viewDeletePicker()
-	case stateDeleteConfirm:
-		return m.viewDeleteConfirm()
-	case stateDeleteTyping:
-		return m.viewDeleteTyping()
+		v = m.viewThread()
+	case stateHandoffPicker, stateHandoffMode, stateHandoffWorking, stateHandoffConfirm:
+		v = m.viewHandoff()
 	case stateMergePicker:
-		return m.viewMergePicker()
+		v = m.viewMergePicker()
+	case stateLLMSetup:
+		v = m.viewLLMSetup()
+	case stateResumePicker:
+		v = m.viewResumePicker()
+	case stateRename:
+		v = m.viewRename()
+	case stateDeletePicker, stateDeleteConfirm, stateDeleteTyping:
+		v = m.viewDelete()
 	default:
-		return m.viewList()
+		v = m.viewList()
 	}
-}
-
-func (m Model) viewOnboarding() string {
-	dialogWidth := 44
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString("  Welcome to threadman\n")
-	inner.WriteString("  Select providers to import from:\n")
-	inner.WriteString("\n")
-	for i, p := range m.onboardingProviders {
-		check := "✓"
-		if !p.selected {
-			check = " "
-		}
-		line := fmt.Sprintf("  [%s] %s", check, p.label)
-		if i == m.onboardingCursor {
-			line = styleCursor.Render("▶") + fmt.Sprintf(" [%s] %s", check, p.label)
-		}
-		inner.WriteString(line + "\n")
+	if m.help {
+		return m.viewHelp(v)
 	}
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  ↑↓ navigate  Space toggle") + "\n")
-	inner.WriteString(styleHint.Render("  Enter import  Q quit") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
-}
-
-func (m Model) viewHookSetup() string {
-	dialogWidth := 46
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString("  Set up auto-ingestion?\n")
-	inner.WriteString("\n")
-	inner.WriteString("  Ingest after every AI response:\n")
-	inner.WriteString("\n")
-	for _, p := range m.onboardingProviders {
-		inner.WriteString(fmt.Sprintf("    %s\n", p.label))
-	}
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  Enter / y  configure") + "\n")
-	inner.WriteString(styleHint.Render("  Esc / n    skip") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
-}
-
-func (m Model) viewHandoffPicker() string {
-	dialogWidth := 48
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString("  Hand off to:\n")
-	inner.WriteString("\n")
-	for i, t := range m.handoffTargets {
-		text := fmt.Sprintf("%-12s %s", domain.ProviderLabel(t.writer.Name()), t.status())
-		switch {
-		case !t.usable():
-			inner.WriteString(styleHint.Render("  "+text) + "\n")
-		case i == m.handoffCursor:
-			inner.WriteString(styleCursor.Render("▶") + " " + text + "\n")
-		default:
-			inner.WriteString("  " + text + "\n")
-		}
-	}
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  ↑↓ navigate  Enter select  Esc back") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+	return v
 }
 
 // modeUsable reports whether a handoff mode can be chosen right now. The
@@ -1183,427 +1093,6 @@ func (m Model) firstUsableMode() int {
 		}
 	}
 	return 0
-}
-
-// llmSummary is a one-line description of the LLM's state.
-func (m Model) llmSummary() string {
-	switch {
-	case m.llmChecking:
-		return "LLM: checking…"
-	case !m.llmStatus.Configured && m.llmStatus.Err != nil:
-		return "LLM: config error"
-	case !m.llmStatus.Configured:
-		return "LLM: not configured"
-	case m.llmStatus.Err != nil:
-		return "LLM: " + m.llmStatus.Label + " unavailable"
-	default:
-		return "LLM: " + m.llmStatus.Label + " ready"
-	}
-}
-
-func (m Model) viewHandoffMode() string {
-	dialogWidth := 56
-
-	label := providerLabels[m.handoffTarget.Name()]
-	if label == "" {
-		label = m.handoffTarget.Name()
-	}
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	if m.handoffChoice.session != nil {
-		inner.WriteString(fmt.Sprintf("  Catch %s up on %s as:\n", label, m.handoffChoice.status()))
-	} else {
-		inner.WriteString(fmt.Sprintf("  Hand off to %s as:\n", label))
-	}
-	inner.WriteString("\n")
-	for i, mode := range handoff.Modes {
-		size := ""
-		if mode == handoff.ModeFull && m.handoffFullSize > 0 {
-			size = styleHint.Render("  " + tokenEstimate(m.handoffFullSize))
-		}
-		switch {
-		case !m.modeUsable(mode):
-			inner.WriteString(styleHint.Render("  "+mode.Label()) + size + "\n")
-		case i == m.handoffModeCursor:
-			inner.WriteString(styleCursor.Render("▶") + " " + mode.Label() + size + "\n")
-		default:
-			inner.WriteString("  " + mode.Label() + size + "\n")
-		}
-	}
-	if m.handoffFullSize > 0 && !m.handoffFullFits {
-		// Without an LLM, the lines below already say how to set one up.
-		warning := lipgloss.NewStyle().Width(dialogWidth - 4).Render(
-			fmt.Sprintf("The full transcript is %s, more than many models accept in one message. A summary is recommended.",
-				tokenEstimate(m.handoffFullSize)))
-		inner.WriteString("\n")
-		for _, line := range strings.Split(warning, "\n") {
-			inner.WriteString(styleWarn.Render("  "+line) + "\n")
-		}
-	}
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  "+m.llmSummary()) + "\n")
-	switch {
-	case m.llmChecking:
-	case m.llmStatus.Err != nil:
-		reason := lipgloss.NewStyle().Width(dialogWidth - 4).Render(m.llmStatus.Err.Error())
-		for _, line := range strings.Split(reason, "\n") {
-			inner.WriteString(styleHint.Render("  "+line) + "\n")
-		}
-	case !m.llmStatus.Configured:
-		inner.WriteString(styleHint.Render("  Summaries need an LLM: press L to set one up") + "\n")
-	}
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  ↑↓ navigate  Enter select  L LLM setup  Esc back") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
-}
-
-func (m Model) viewHandoffWorking() string {
-	dialogWidth := 56
-
-	line := "  Writing session…"
-	switch {
-	case m.merging:
-		line = fmt.Sprintf("  Summarizing %d threads with %s…", len(m.mergeGroups), m.llmStatus.Label)
-	case m.handoffMode.NeedsLLM():
-		line = "  Summarizing with " + m.llmStatus.Label + "…"
-	}
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString(line + "\n")
-	inner.WriteString("\n")
-	if m.handoffMode.NeedsLLM() {
-		inner.WriteString(styleHint.Render("  This can take a minute for long threads.") + "\n")
-	}
-	inner.WriteString(styleHint.Render("  Esc cancel") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
-}
-
-func (m Model) viewResumePicker() string {
-	dialogWidth := 40
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString("  Resume in:\n")
-	inner.WriteString("\n")
-	for i, t := range m.groupThreads {
-		label := providerLabels[t.Provider]
-		if label == "" {
-			label = t.Provider
-		}
-		if t.SourceMissing {
-			label += styleHint.Render("  deleted")
-		}
-		line := fmt.Sprintf("  %s", label)
-		if i == m.resumeCursor {
-			line = styleCursor.Render("▶") + fmt.Sprintf(" %s", label)
-		}
-		inner.WriteString(line + "\n")
-	}
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  ↑↓ navigate  Enter select  Esc back") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
-}
-
-func (m Model) viewHandoffConfirm() string {
-	dialogWidth := 50
-
-	label := providerLabels[m.handoffTarget.Name()]
-	if label == "" {
-		label = m.handoffTarget.Name()
-	}
-
-	var prompt string
-	if m.merging {
-		prompt = fmt.Sprintf("  Merged %d threads into a new %s session.\n  Open it now?", m.handoffCount, label)
-	} else if m.handoffAppended {
-		noun := "messages"
-		if m.handoffCount == 1 {
-			noun = "message"
-		}
-		prompt = fmt.Sprintf("  Added %d %s to %s.\n  Resume it now?", m.handoffCount, noun, label)
-	} else {
-		prompt = fmt.Sprintf("  Open in %s?", label)
-	}
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString(prompt + "\n")
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  y  open    n / Esc  cancel") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
-}
-
-func (m Model) viewRename() string {
-	dialogWidth := 50
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString("  Rename thread:\n")
-	inner.WriteString("\n")
-	inner.WriteString(fmt.Sprintf("  > %s_\n", m.renameDraft))
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  Enter save    Esc cancel") + "\n")
-	inner.WriteString(styleHint.Render("  (empty string clears custom title)") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
-}
-
-func (m Model) viewDeletePicker() string {
-	dialogWidth := 44
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString("  Delete copies:\n")
-	inner.WriteString("\n")
-	for i, t := range m.deleteTargets {
-		check := " "
-		if m.deleteSelected[i] {
-			check = "x"
-		}
-		label := providerLabels[t.Provider]
-		if label == "" {
-			label = t.Provider
-		}
-		line := fmt.Sprintf("  [%s] %s", check, label)
-		if i == m.cursor {
-			line = styleCursor.Render("▶") + fmt.Sprintf(" [%s] %s", check, label)
-		}
-		inner.WriteString(line + "\n")
-	}
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  Space toggle  a all  Enter confirm") + "\n")
-	inner.WriteString(styleHint.Render("  Esc cancel") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
-}
-
-func (m Model) viewDeleteConfirm() string {
-	dialogWidth := 44
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString("  Delete selected copies?\n")
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  y confirm    n / Esc cancel") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
-}
-
-func (m Model) viewDeleteTyping() string {
-	dialogWidth := 50
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString("  This is the original or last remaining copy.\n")
-	inner.WriteString("  Type \"delete thread\" to confirm:\n")
-	inner.WriteString("\n")
-	inner.WriteString(fmt.Sprintf("  > %s_\n", m.deleteDraft))
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  Enter confirm    Esc cancel") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
-}
-
-func (m Model) viewList() string {
-	var b strings.Builder
-
-	// header bar
-	title := styleTitle.Render("threadman")
-	archivedHint := "[A]show-archived"
-	if m.showArchived {
-		archivedHint = "[A]hide-archived"
-	}
-	hints := styleHint.Render("[s]sync [/]search [m]merge [d]del [n]ren [a]arch " + archivedHint + " [L]llm [q]quit")
-	gap := m.width - lipgloss.Width(title) - lipgloss.Width(hints)
-	if gap < 1 {
-		gap = 1
-	}
-	b.WriteString(title + strings.Repeat(" ", gap) + hints + "\n")
-	b.WriteString(styleSep.Render(strings.Repeat("─", m.width)) + "\n")
-
-	// column headers
-	if m.state == stateSearch {
-		b.WriteString(styleHeader.Render(fmt.Sprintf("  search: %s_", m.query)) + "\n")
-	} else {
-		titleWidth := m.width - 47
-		if titleWidth < 10 {
-			titleWidth = 10
-		}
-		b.WriteString(styleHeader.Render(fmt.Sprintf("  %-3s  %-7s  %-*s  %-18s  %s", "#", "PROV", titleWidth, "TITLE", "WORKSPACE", "DATE")) + "\n")
-	}
-	b.WriteString(styleSep.Render(strings.Repeat("─", m.width)) + "\n")
-
-	// rows
-	listHeight := m.height - 6
-	start := 0
-	if m.cursor >= listHeight {
-		start = m.cursor - listHeight + 1
-	}
-	for i := start; i < len(m.filteredGroups) && i < start+listHeight; i++ {
-		g := m.filteredGroups[i]
-		cursor := "  "
-		picked := m.mergeSelected[groupKey(g)]
-		if picked {
-			cursor = styleCursor.Render(" ✓")
-		}
-		row := renderListRow(i+1, g, m.width)
-		if i == m.cursor {
-			cursor = styleCursor.Render("▶ ")
-			if picked {
-				cursor = styleCursor.Render("▶✓")
-			}
-			row = styleSelected.Width(m.width - 2).Render(row)
-		} else if g.Primary.Archived {
-			row = styleArchived.Render(row)
-		}
-		b.WriteString(cursor + row + "\n")
-	}
-
-	// fill remaining space
-	rendered := start + min(listHeight, len(m.filteredGroups)-start)
-	for i := rendered; i < listHeight; i++ {
-		b.WriteString("\n")
-	}
-
-	// status bar
-	var statusLine string
-	if m.status != "" {
-		statusLine = m.status
-	} else {
-		count := fmt.Sprintf("%d threads  ·  %s", len(m.filteredGroups), m.llmSummary())
-		nav := "↑↓ navigate  Enter open  Space select"
-		if n := len(m.mergeSelected); n > 0 {
-			count = fmt.Sprintf("%d selected  ·  %s", n, m.llmSummary())
-			nav = "Space select  m merge  Esc clear"
-		}
-		statusGap := m.width - lipgloss.Width(count) - lipgloss.Width(nav) - 2
-		if statusGap < 1 {
-			statusGap = 1
-		}
-		statusLine = count + strings.Repeat(" ", statusGap) + nav
-	}
-	b.WriteString(styleStatus.Width(m.width).Render(statusLine))
-
-	return b.String()
-}
-
-func (m Model) viewThread() string {
-	var b strings.Builder
-
-	title := m.thread.Title
-	if title == "" {
-		title = "(untitled)"
-	}
-	var tag string
-	if len(m.groupThreads) > 1 {
-		tag = providerIcons(ThreadGroup{Primary: m.thread, Members: m.groupThreads})
-	} else {
-		tag = providerStyle(m.thread.Provider).Render("[" + m.thread.Provider + "]")
-	}
-	hint := styleHint.Render("[r] resume  [h] handoff  [q] back")
-	ws := styleHint.Render(m.thread.WorkspacePath)
-	if gone := goneTools(m.groupThreads); gone != "" {
-		ws += styleHint.Render("  · deleted in " + gone + ", kept by threadman")
-	}
-	left := tag + " " + styleTitle.Render(title) + "  " + ws
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(hint)
-	if gap < 1 {
-		gap = 1
-	}
-	b.WriteString(left + strings.Repeat(" ", gap) + hint + "\n")
-	b.WriteString(styleSep.Render(strings.Repeat("─", m.width)) + "\n")
-
-	b.WriteString(m.viewport.View())
-
-	scroll := fmt.Sprintf("  %d%%", int(m.viewport.ScrollPercent()*100))
-	b.WriteString("\n" + styleStatus.Width(m.width).Render(scroll))
-
-	return b.String()
-}
-
-func renderListRow(n int, g ThreadGroup, width int) string {
-	// fixed: cursor(2) + num(3) + gap(2) + icons(7) + gap(2) + gap(2) + ws(18) + gap(2) + date(9) = 47
-	titleWidth := width - 47
-	if titleWidth < 10 {
-		titleWidth = 10
-	}
-
-	icons := providerIcons(g)
-	iconsVisual := lipgloss.Width(icons)
-	if iconsVisual < 7 {
-		icons += strings.Repeat(" ", 7-iconsVisual)
-	}
-
-	title := g.Primary.Title
-	if title == "" {
-		title = "(untitled)"
-	}
-	title = truncateRunes(title, titleWidth)
-	ws := truncateRunes(filepath.Base(g.Primary.WorkspacePath), 18)
-	date := lastMessageDate(g.Primary)
-	return fmt.Sprintf("%-3d  %s  %-*s  %-18s  %s", n, icons, titleWidth, title, ws, date)
 }
 
 // truncateRunes shortens s to at most n characters, ending it with "...".
@@ -1633,19 +1122,6 @@ func launch(cmd *exec.Cmd) tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return launchDoneMsg{command: name, err: err}
 	})
-}
-
-func lastMessageDate(t domain.Thread) string {
-	var last time.Time
-	for _, m := range t.Messages {
-		if m.Timestamp.After(last) {
-			last = m.Timestamp
-		}
-	}
-	if last.IsZero() {
-		return t.CreatedAt.Format("02 Jan 06")
-	}
-	return last.Format("02 Jan 06")
 }
 
 func min(a, b int) int {

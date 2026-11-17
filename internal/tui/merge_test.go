@@ -52,7 +52,7 @@ func TestSelectThreadsAndOpenMergeDialog(t *testing.T) {
 	if len(m.mergeSelected) != 2 || m.cursor != 2 {
 		t.Fatalf("selected %v, cursor %d", m.mergeSelected, m.cursor)
 	}
-	if view := m.View(); !strings.Contains(view, "2 selected") || !strings.Contains(view, "m merge") {
+	if view := m.View(); !strings.Contains(view, "2 selected") || !strings.Contains(view, "merge") {
 		t.Errorf("status bar doesn't show the selection:\n%s", view)
 	}
 
@@ -65,8 +65,8 @@ func TestSelectThreadsAndOpenMergeDialog(t *testing.T) {
 	}
 
 	m.llmChecking = false
-	view := m.View()
-	for _, want := range []string{"Merge 2 threads into a new session in:", "1. [P] Second", "2. [C] Third", "Runs in", "Merging needs an LLM"} {
+	view := m.mergePanel()
+	for _, want := range []string{"Merge 2 threads into a new session in:", "1. " + providerIcon("pi") + " Second", "2. " + providerIcon("claude") + " Third", "Runs in", "Merging needs an LLM"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("dialog missing %q:\n%s", want, view)
 		}

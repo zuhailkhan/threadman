@@ -8,13 +8,13 @@ That database is a durable copy. When a tool deletes a session, for example when
 
 ## Features
 
-- **Interactive TUI** — full-screen thread browser with colors, navigation, and inline search
+- **Interactive TUI** — thread list grouped by date with a preview pane, tool tabs, and search across titles and messages; adapts to light and dark terminals
 - **Multi-provider import** — reads local session files from Claude Code, OpenCode, pi, Antigravity and Codex; first run lets you pick which providers to import
 - **Live updates** — optional per-response hooks ingest new messages as you chat, and the TUI refreshes automatically
-- **Thread reader** — scrollable message view with You/Assistant labels
+- **Thread reader** — conversation view with an outline of your prompts to jump between, timestamps, code blocks and tool calls
 - **Handoff** — transfer any conversation to a different provider's native session format and open it immediately, as the full transcript or as an LLM-written summary
 - **Merge** — bring several separate threads together into one new session, each briefed with its tool, project and dates
-- **Thread grouping** — threads handed off across providers are grouped into a single row with provider icon clusters `[C O]`; a tool that has deleted its session shows dimmed
+- **Thread grouping** — threads handed off across providers are grouped into a single row showing each tool's icon; a tool that has deleted its session shows dimmed
 - **Durable history** — conversations survive their tool deleting the session
 - **CLI subcommands** — `sync`, `list`, `search`, `show` for scripting
 
@@ -152,25 +152,32 @@ A merge always writes a new session, which runs in the newest thread's workspace
 
 ### TUI Keybindings
 
+Press `?` in the thread list or the reader to see every key. The footer shows the keys that work on the current screen.
+
 | Key | Action |
 |-----|--------|
-| ↑ / k | Move up |
-| ↓ / j | Move down |
+| ↑ / k, ↓ / j | Move, or scroll the reader |
+| g / G | Go to the top or bottom |
 | Enter | Open thread |
-| q / Esc | Quit or go back; Esc in the thread list clears the selection |
+| q / Esc | Quit or go back; Esc in the thread list clears the selection, then the search |
+| / | Search titles and message text |
+| Tab / Shift+Tab | Show one tool's threads, cycling through the tools |
 | s | Sync all providers |
-| / | Inline search |
 | a | Archive or unarchive selected thread |
 | A | Show or hide archived threads |
 | n | Rename selected thread |
 | d | Delete selected thread |
 | H | Set up ingestion hooks |
-| PgUp / PgDn | Scroll thread |
-| Space | Toggle selection (thread list, first-run provider picker, delete picker) |
+| Space | Toggle selection (thread list, first-run picker, delete picker) |
 | m | Merge the selected threads into a new session |
+| [ / ] | Jump to the previous or next of your prompts in the reader |
+| PgUp / PgDn | Scroll the reader a page |
 | h | Handoff current thread to another provider |
 | L | Set up the LLM used for handoff summaries |
 | r | Resume current thread in its native provider CLI |
+| ? | Show every key |
+
+Each tool has an icon: ✻ Claude Code, ▣ OpenCode, π pi, ▲ Antigravity, ◎ Codex and ✦ Gemini. They are plain Unicode and work in any terminal. With a [Nerd Font](https://www.nerdfonts.com) 3.5 or newer, set `THREADMAN_ICONS=nerd` (or `NERD_FONT=1`) to use its glyphs instead, including the Claude logo. A terminal can't tell threadman which font it uses, so this is a setting rather than detected.
 
 ## Roadmap
 

@@ -3,12 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/zuhailkhan/threadman/internal/conversation"
 	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/handoff"
@@ -118,74 +115,4 @@ func (m *Model) startMerge() tea.Cmd {
 	m.state = stateMergePicker
 	m.llmChecking = true
 	return m.checkLLM()
-}
-
-func (m Model) viewMergePicker() string {
-	dialogWidth := 64
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString(fmt.Sprintf("  Merge %d threads into a new session in:\n", len(m.mergeGroups)))
-	inner.WriteString("\n")
-	for i, w := range m.targetWriters() {
-		label := domain.ProviderLabel(w.Name())
-		if i == m.handoffCursor {
-			inner.WriteString(styleCursor.Render("▶") + " " + label + "\n")
-		} else {
-			inner.WriteString("  " + label + "\n")
-		}
-	}
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  Oldest first:") + "\n")
-	for i, g := range m.mergeGroups {
-		title := g.Primary.CustomTitle
-		if title == "" {
-			title = g.Primary.Title
-		}
-		if title == "" {
-			title = "(untitled)"
-		}
-		line := fmt.Sprintf("%d. %s %s", i+1, providerIcons(g), truncateRunes(title, dialogWidth-26))
-		date := styleHint.Render(lastMessageDate(g.Primary))
-		gap := dialogWidth - 4 - lipgloss.Width(line) - lipgloss.Width(date)
-		if gap < 1 {
-			gap = 1
-		}
-		inner.WriteString("  " + line + strings.Repeat(" ", gap) + date + "\n")
-	}
-	if n := len(m.mergeGroups); n > 0 {
-		newest := mergeSource(m.mergeGroups[n-1].Primary, m.mergeGroups[n-1].Members)
-		if newest.WorkspacePath != "" {
-			inner.WriteString(styleHint.Render("  Runs in "+filepath.Clean(newest.WorkspacePath)) + "\n")
-		}
-	}
-	inner.WriteString("\n")
-	note := lipgloss.NewStyle().Width(dialogWidth - 4).Render(
-		"Each thread gets a brief of its own with its project and dates. The newest keeps its last 2 messages word for word.")
-	for _, line := range strings.Split(note, "\n") {
-		inner.WriteString(styleHint.Render("  "+line) + "\n")
-	}
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  "+m.llmSummary()) + "\n")
-	switch {
-	case m.llmChecking:
-	case m.llmStatus.Err != nil:
-		reason := lipgloss.NewStyle().Width(dialogWidth - 4).Render(m.llmStatus.Err.Error())
-		for _, line := range strings.Split(reason, "\n") {
-			inner.WriteString(styleHint.Render("  "+line) + "\n")
-		}
-	case !m.llmStatus.Configured:
-		inner.WriteString(styleWarn.Render("  Merging needs an LLM: press L to set one up") + "\n")
-	}
-	inner.WriteString("\n")
-	inner.WriteString(styleHint.Render("  ↑↓ navigate  Enter merge  L LLM setup  Esc back") + "\n")
-	inner.WriteString("\n")
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444444")).
-		Width(dialogWidth).
-		Render(inner.String())
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
 }
