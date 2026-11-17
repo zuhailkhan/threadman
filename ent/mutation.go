@@ -38,6 +38,8 @@ type HandoffMutation struct {
 	typ                     string
 	id                      *string
 	source_thread_id        *string
+	merged_from             *[]string
+	appendmerged_from       []string
 	target_thread_id        *string
 	target_provider         *string
 	mode                    *string
@@ -191,6 +193,71 @@ func (m *HandoffMutation) OldSourceThreadID(ctx context.Context) (v string, err 
 // ResetSourceThreadID resets all changes to the "source_thread_id" field.
 func (m *HandoffMutation) ResetSourceThreadID() {
 	m.source_thread_id = nil
+}
+
+// SetMergedFrom sets the "merged_from" field.
+func (m *HandoffMutation) SetMergedFrom(s []string) {
+	m.merged_from = &s
+	m.appendmerged_from = nil
+}
+
+// MergedFrom returns the value of the "merged_from" field in the mutation.
+func (m *HandoffMutation) MergedFrom() (r []string, exists bool) {
+	v := m.merged_from
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMergedFrom returns the old "merged_from" field's value of the Handoff entity.
+// If the Handoff object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *HandoffMutation) OldMergedFrom(ctx context.Context) (v []string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMergedFrom is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMergedFrom requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMergedFrom: %w", err)
+	}
+	return oldValue.MergedFrom, nil
+}
+
+// AppendMergedFrom adds s to the "merged_from" field.
+func (m *HandoffMutation) AppendMergedFrom(s []string) {
+	m.appendmerged_from = append(m.appendmerged_from, s...)
+}
+
+// AppendedMergedFrom returns the list of values that were appended to the "merged_from" field in this mutation.
+func (m *HandoffMutation) AppendedMergedFrom() ([]string, bool) {
+	if len(m.appendmerged_from) == 0 {
+		return nil, false
+	}
+	return m.appendmerged_from, true
+}
+
+// ClearMergedFrom clears the value of the "merged_from" field.
+func (m *HandoffMutation) ClearMergedFrom() {
+	m.merged_from = nil
+	m.appendmerged_from = nil
+	m.clearedFields[handoff.FieldMergedFrom] = struct{}{}
+}
+
+// MergedFromCleared returns if the "merged_from" field was cleared in this mutation.
+func (m *HandoffMutation) MergedFromCleared() bool {
+	_, ok := m.clearedFields[handoff.FieldMergedFrom]
+	return ok
+}
+
+// ResetMergedFrom resets all changes to the "merged_from" field.
+func (m *HandoffMutation) ResetMergedFrom() {
+	m.merged_from = nil
+	m.appendmerged_from = nil
+	delete(m.clearedFields, handoff.FieldMergedFrom)
 }
 
 // SetTargetThreadID sets the "target_thread_id" field.
@@ -535,9 +602,12 @@ func (m *HandoffMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *HandoffMutation) Fields() []string {
-	fields := make([]string, 0, 9)
+	fields := make([]string, 0, 10)
 	if m.source_thread_id != nil {
 		fields = append(fields, handoff.FieldSourceThreadID)
+	}
+	if m.merged_from != nil {
+		fields = append(fields, handoff.FieldMergedFrom)
 	}
 	if m.target_thread_id != nil {
 		fields = append(fields, handoff.FieldTargetThreadID)
@@ -573,6 +643,8 @@ func (m *HandoffMutation) Field(name string) (ent.Value, bool) {
 	switch name {
 	case handoff.FieldSourceThreadID:
 		return m.SourceThreadID()
+	case handoff.FieldMergedFrom:
+		return m.MergedFrom()
 	case handoff.FieldTargetThreadID:
 		return m.TargetThreadID()
 	case handoff.FieldTargetProvider:
@@ -600,6 +672,8 @@ func (m *HandoffMutation) OldField(ctx context.Context, name string) (ent.Value,
 	switch name {
 	case handoff.FieldSourceThreadID:
 		return m.OldSourceThreadID(ctx)
+	case handoff.FieldMergedFrom:
+		return m.OldMergedFrom(ctx)
 	case handoff.FieldTargetThreadID:
 		return m.OldTargetThreadID(ctx)
 	case handoff.FieldTargetProvider:
@@ -631,6 +705,13 @@ func (m *HandoffMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetSourceThreadID(v)
+		return nil
+	case handoff.FieldMergedFrom:
+		v, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMergedFrom(v)
 		return nil
 	case handoff.FieldTargetThreadID:
 		v, ok := value.(string)
@@ -732,7 +813,11 @@ func (m *HandoffMutation) AddField(name string, value ent.Value) error {
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
 func (m *HandoffMutation) ClearedFields() []string {
-	return nil
+	var fields []string
+	if m.FieldCleared(handoff.FieldMergedFrom) {
+		fields = append(fields, handoff.FieldMergedFrom)
+	}
+	return fields
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
@@ -745,6 +830,11 @@ func (m *HandoffMutation) FieldCleared(name string) bool {
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
 func (m *HandoffMutation) ClearField(name string) error {
+	switch name {
+	case handoff.FieldMergedFrom:
+		m.ClearMergedFrom()
+		return nil
+	}
 	return fmt.Errorf("unknown Handoff nullable field %s", name)
 }
 
@@ -754,6 +844,9 @@ func (m *HandoffMutation) ResetField(name string) error {
 	switch name {
 	case handoff.FieldSourceThreadID:
 		m.ResetSourceThreadID()
+		return nil
+	case handoff.FieldMergedFrom:
+		m.ResetMergedFrom()
 		return nil
 	case handoff.FieldTargetThreadID:
 		m.ResetTargetThreadID()

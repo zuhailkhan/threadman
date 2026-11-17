@@ -29,6 +29,12 @@ func (_c *HandoffCreate) SetSourceThreadID(v string) *HandoffCreate {
 	return _c
 }
 
+// SetMergedFrom sets the "merged_from" field.
+func (_c *HandoffCreate) SetMergedFrom(v []string) *HandoffCreate {
+	_c.mutation.SetMergedFrom(v)
+	return _c
+}
+
 // SetTargetThreadID sets the "target_thread_id" field.
 func (_c *HandoffCreate) SetTargetThreadID(v string) *HandoffCreate {
 	_c.mutation.SetTargetThreadID(v)
@@ -213,6 +219,10 @@ func (_c *HandoffCreate) createSpec() (*Handoff, *sqlgraph.CreateSpec) {
 		_spec.SetField(handoff.FieldSourceThreadID, field.TypeString, value)
 		_node.SourceThreadID = value
 	}
+	if value, ok := _c.mutation.MergedFrom(); ok {
+		_spec.SetField(handoff.FieldMergedFrom, field.TypeJSON, value)
+		_node.MergedFrom = value
+	}
 	if value, ok := _c.mutation.TargetThreadID(); ok {
 		_spec.SetField(handoff.FieldTargetThreadID, field.TypeString, value)
 		_node.TargetThreadID = value
@@ -306,6 +316,24 @@ func (u *HandoffUpsert) SetSourceThreadID(v string) *HandoffUpsert {
 // UpdateSourceThreadID sets the "source_thread_id" field to the value that was provided on create.
 func (u *HandoffUpsert) UpdateSourceThreadID() *HandoffUpsert {
 	u.SetExcluded(handoff.FieldSourceThreadID)
+	return u
+}
+
+// SetMergedFrom sets the "merged_from" field.
+func (u *HandoffUpsert) SetMergedFrom(v []string) *HandoffUpsert {
+	u.Set(handoff.FieldMergedFrom, v)
+	return u
+}
+
+// UpdateMergedFrom sets the "merged_from" field to the value that was provided on create.
+func (u *HandoffUpsert) UpdateMergedFrom() *HandoffUpsert {
+	u.SetExcluded(handoff.FieldMergedFrom)
+	return u
+}
+
+// ClearMergedFrom clears the value of the "merged_from" field.
+func (u *HandoffUpsert) ClearMergedFrom() *HandoffUpsert {
+	u.SetNull(handoff.FieldMergedFrom)
 	return u
 }
 
@@ -470,6 +498,27 @@ func (u *HandoffUpsertOne) SetSourceThreadID(v string) *HandoffUpsertOne {
 func (u *HandoffUpsertOne) UpdateSourceThreadID() *HandoffUpsertOne {
 	return u.Update(func(s *HandoffUpsert) {
 		s.UpdateSourceThreadID()
+	})
+}
+
+// SetMergedFrom sets the "merged_from" field.
+func (u *HandoffUpsertOne) SetMergedFrom(v []string) *HandoffUpsertOne {
+	return u.Update(func(s *HandoffUpsert) {
+		s.SetMergedFrom(v)
+	})
+}
+
+// UpdateMergedFrom sets the "merged_from" field to the value that was provided on create.
+func (u *HandoffUpsertOne) UpdateMergedFrom() *HandoffUpsertOne {
+	return u.Update(func(s *HandoffUpsert) {
+		s.UpdateMergedFrom()
+	})
+}
+
+// ClearMergedFrom clears the value of the "merged_from" field.
+func (u *HandoffUpsertOne) ClearMergedFrom() *HandoffUpsertOne {
+	return u.Update(func(s *HandoffUpsert) {
+		s.ClearMergedFrom()
 	})
 }
 
@@ -818,6 +867,27 @@ func (u *HandoffUpsertBulk) SetSourceThreadID(v string) *HandoffUpsertBulk {
 func (u *HandoffUpsertBulk) UpdateSourceThreadID() *HandoffUpsertBulk {
 	return u.Update(func(s *HandoffUpsert) {
 		s.UpdateSourceThreadID()
+	})
+}
+
+// SetMergedFrom sets the "merged_from" field.
+func (u *HandoffUpsertBulk) SetMergedFrom(v []string) *HandoffUpsertBulk {
+	return u.Update(func(s *HandoffUpsert) {
+		s.SetMergedFrom(v)
+	})
+}
+
+// UpdateMergedFrom sets the "merged_from" field to the value that was provided on create.
+func (u *HandoffUpsertBulk) UpdateMergedFrom() *HandoffUpsertBulk {
+	return u.Update(func(s *HandoffUpsert) {
+		s.UpdateMergedFrom()
+	})
+}
+
+// ClearMergedFrom clears the value of the "merged_from" field.
+func (u *HandoffUpsertBulk) ClearMergedFrom() *HandoffUpsertBulk {
+	return u.Update(func(s *HandoffUpsert) {
+		s.ClearMergedFrom()
 	})
 }
 

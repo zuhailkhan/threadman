@@ -83,7 +83,34 @@ func (m Mode) NeedsLLM() bool {
 
 const detailedPrompt = `You write handoff briefs. A conversation between a user and an AI coding assistant is being moved to a different assistant, which will see only your brief, not the conversation. Write what that assistant needs in order to continue the work without asking the user to repeat themselves.
 
-Use exactly these markdown sections, in this order:
+` + detailedSections + `
+
+Rules:
+` + tailRule + `
+` + toolRule + `
+` + detailedRules
+
+const lightPrompt = `You write handoff briefs. A conversation between a user and an AI coding assistant is being moved to a different assistant, which will see only your brief, not the conversation.
+
+Write a brief of at most 200 words covering, in this order: what the user is trying to achieve, where the work stood at the end of the turns you are summarizing, and what was planned next. Mention an approach that was rejected only if the next assistant would be likely to suggest it again.
+
+Rules:
+` + tailRule + `
+` + toolRule + `
+- Quote exact file paths, commands and identifiers where they matter.
+- Write the brief only, with no preamble or closing remarks.`
+
+// tailRule tells the summarizer its transcript stops short of the messages
+// handed over word for word.
+const tailRule = `- The transcript is the earlier part of the conversation. Its most recent turns are not shown to you; the next assistant receives them word for word right after your brief. Describe the state as of the end of the transcript and do not guess what happened afterwards.`
+
+const toolRule = `- Lines starting with → are tool calls the assistant made, each followed by the start of its output. Use them to say what was actually run or changed, but do not assume a command succeeded or a file was changed unless its output or a message shows it.`
+
+const detailedRules = `- Record only decisions that were actually made. Do not invent any. Write "None." under a section that has nothing to report.
+- Keep to the decisions and facts that matter for continuing; leave out pleasantries and dead-end chatter.
+- Write the brief only, with no preamble or closing remarks.`
+
+const detailedSections = `Use exactly these markdown sections, in this order:
 
 ## Goal
 What the user is trying to achieve, including constraints and preferences they stated.
@@ -101,24 +128,7 @@ Approaches that were considered or tried and then dropped, each with the reason,
 Anything unresolved or waiting on the user.
 
 ## Next steps
-What was planned next at the end of the turns you are summarizing, most immediate first.
-
-Rules:
-- The transcript is the earlier part of the conversation. Its most recent turns are not shown to you; the next assistant receives them word for word right after your brief. Describe the state as of the end of the transcript and do not guess what happened afterwards.
-- The transcript contains only the text of each message. Tool calls, file edits and command output are not in it. Report only what the text states; do not infer that a file was changed or a command succeeded unless a message says so.
-- Record only decisions that were actually made. Do not invent any. Write "None." under a section that has nothing to report.
-- Keep to the decisions and facts that matter for continuing; leave out pleasantries and dead-end chatter.
-- Write the brief only, with no preamble or closing remarks.`
-
-const lightPrompt = `You write handoff briefs. A conversation between a user and an AI coding assistant is being moved to a different assistant, which will see only your brief, not the conversation.
-
-Write a brief of at most 200 words covering, in this order: what the user is trying to achieve, where the work stood at the end of the turns you are summarizing, and what was planned next. Mention an approach that was rejected only if the next assistant would be likely to suggest it again.
-
-Rules:
-- The transcript is the earlier part of the conversation. Its most recent turns are not shown to you; the next assistant receives them word for word right after your brief. Describe the state as of the end of the transcript and do not guess what happened afterwards.
-- The transcript contains only the text of each message. Tool calls, file edits and command output are not in it. Report only what the text states.
-- Quote exact file paths, commands and identifiers where they matter.
-- Write the brief only, with no preamble or closing remarks.`
+What was planned next at the end of the turns you are summarizing, most immediate first.`
 
 // Status is the result of checking the configured LLM.
 type Status struct {
@@ -342,6 +352,12 @@ func composeBlock(id string, t domain.Thread, mode Mode, split int, summary, sum
 // sourceLabel names the tools the handed-over messages were written in, in
 // the order they first appear.
 func sourceLabel(t domain.Thread) string {
+	return joinAnd(toolLabels(t))
+}
+
+// toolLabels names the tools t's messages were written in, in the order they
+// first appear; a thread with no messages names its own tool.
+func toolLabels(t domain.Thread) []string {
 	var names []string
 	seen := map[string]bool{}
 	for _, m := range t.Messages {
@@ -354,9 +370,16 @@ func sourceLabel(t domain.Thread) string {
 			names = append(names, domain.ProviderLabel(p))
 		}
 	}
+	if len(names) == 0 {
+		names = []string{domain.ProviderLabel(t.Provider)}
+	}
+	return names
+}
+
+func joinAnd(names []string) string {
 	switch len(names) {
 	case 0:
-		return domain.ProviderLabel(t.Provider)
+		return ""
 	case 1:
 		return names[0]
 	default:

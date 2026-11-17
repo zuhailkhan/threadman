@@ -3,6 +3,7 @@
 package ent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -19,6 +20,8 @@ type Handoff struct {
 	ID string `json:"id,omitempty"`
 	// SourceThreadID holds the value of the "source_thread_id" field.
 	SourceThreadID string `json:"source_thread_id,omitempty"`
+	// MergedFrom holds the value of the "merged_from" field.
+	MergedFrom []string `json:"merged_from,omitempty"`
 	// TargetThreadID holds the value of the "target_thread_id" field.
 	TargetThreadID string `json:"target_thread_id,omitempty"`
 	// TargetProvider holds the value of the "target_provider" field.
@@ -43,6 +46,8 @@ func (*Handoff) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case handoff.FieldMergedFrom:
+			values[i] = new([]byte)
 		case handoff.FieldSourceMessageCount:
 			values[i] = new(sql.NullInt64)
 		case handoff.FieldID, handoff.FieldSourceThreadID, handoff.FieldTargetThreadID, handoff.FieldTargetProvider, handoff.FieldMode, handoff.FieldSummarizer, handoff.FieldSourceLastMessageID, handoff.FieldContent:
@@ -75,6 +80,14 @@ func (_m *Handoff) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field source_thread_id", values[i])
 			} else if value.Valid {
 				_m.SourceThreadID = value.String
+			}
+		case handoff.FieldMergedFrom:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field merged_from", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.MergedFrom); err != nil {
+					return fmt.Errorf("unmarshal field merged_from: %w", err)
+				}
 			}
 		case handoff.FieldTargetThreadID:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -162,6 +175,9 @@ func (_m *Handoff) String() string {
 	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
 	builder.WriteString("source_thread_id=")
 	builder.WriteString(_m.SourceThreadID)
+	builder.WriteString(", ")
+	builder.WriteString("merged_from=")
+	builder.WriteString(fmt.Sprintf("%v", _m.MergedFrom))
 	builder.WriteString(", ")
 	builder.WriteString("target_thread_id=")
 	builder.WriteString(_m.TargetThreadID)

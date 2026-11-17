@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -611,7 +612,7 @@ func TestRecordHandoff_StoresRecord(t *testing.T) {
 		t.Errorf("CreatedAt: got %v, want %v", got.CreatedAt, want.CreatedAt)
 	}
 	got.CreatedAt = want.CreatedAt
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("record:\n got %+v\nwant %+v", got, want)
 	}
 	if got.TargetThreadID() != "pi-sess-1" {
@@ -653,6 +654,52 @@ func TestRecordHandoff_KeepsMessagesOfAlreadySyncedTarget(t *testing.T) {
 	}
 	if threads[0].CanonicalID != "claude-abc" {
 		t.Errorf("target not linked: canonical_id %q", threads[0].CanonicalID)
+	}
+}
+
+// A merged session is a conversation of its own: the threads it came from
+// ran separately, so none of them is linked to it or to each other.
+func TestRecordHandoff_MergeKeepsTargetSeparate(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	older := threadWithMessages("claude-a", "claude", "a")
+	newer := threadWithMessages("opencode-b", "opencode", "b")
+	newer.Title = "fix the parser"
+	newer.WorkspacePath = "/proj"
+	for _, th := range []domain.Thread{older, newer} {
+		if err := repo.UpsertThread(ctx, th); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+	h := testHandoff(newer, "pi", "merged-1")
+	h.Mode = "merge"
+	h.MergedFrom = []string{"claude-a", "opencode-b"}
+	if err := repo.RecordHandoff(ctx, newer, h); err != nil {
+		t.Fatalf("RecordHandoff: %v", err)
+	}
+
+	got, err := repo.GetHandoff(ctx, h.ID)
+	if err != nil {
+		t.Fatalf("GetHandoff: %v", err)
+	}
+	if !reflect.DeepEqual(got.MergedFrom, h.MergedFrom) {
+		t.Errorf("MergedFrom: got %v, want %v", got.MergedFrom, h.MergedFrom)
+	}
+
+	threads, err := repo.ListThreads(ctx, "", false)
+	if err != nil {
+		t.Fatalf("ListThreads: %v", err)
+	}
+	for _, th := range threads {
+		if th.CanonicalID != "" && th.CanonicalID != th.ID {
+			t.Errorf("%s linked into %q; a merge links nothing", th.ID, th.CanonicalID)
+		}
+		if th.ID == "pi-merged-1" {
+			if th.Title != "fix the parser (merged from 2)" || th.WorkspacePath != "/proj" {
+				t.Errorf("merged stub: title %q, workspace %q", th.Title, th.WorkspacePath)
+			}
+		}
 	}
 }
 

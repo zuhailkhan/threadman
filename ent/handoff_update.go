@@ -10,6 +10,7 @@ import (
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"entgo.io/ent/dialect/sql/sqljson"
 	"entgo.io/ent/schema/field"
 	"github.com/zuhailkhan/threadman/ent/handoff"
 	"github.com/zuhailkhan/threadman/ent/predicate"
@@ -39,6 +40,24 @@ func (_u *HandoffUpdate) SetNillableSourceThreadID(v *string) *HandoffUpdate {
 	if v != nil {
 		_u.SetSourceThreadID(*v)
 	}
+	return _u
+}
+
+// SetMergedFrom sets the "merged_from" field.
+func (_u *HandoffUpdate) SetMergedFrom(v []string) *HandoffUpdate {
+	_u.mutation.SetMergedFrom(v)
+	return _u
+}
+
+// AppendMergedFrom appends value to the "merged_from" field.
+func (_u *HandoffUpdate) AppendMergedFrom(v []string) *HandoffUpdate {
+	_u.mutation.AppendMergedFrom(v)
+	return _u
+}
+
+// ClearMergedFrom clears the value of the "merged_from" field.
+func (_u *HandoffUpdate) ClearMergedFrom() *HandoffUpdate {
+	_u.mutation.ClearMergedFrom()
 	return _u
 }
 
@@ -205,6 +224,17 @@ func (_u *HandoffUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.SourceThreadID(); ok {
 		_spec.SetField(handoff.FieldSourceThreadID, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.MergedFrom(); ok {
+		_spec.SetField(handoff.FieldMergedFrom, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedMergedFrom(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, handoff.FieldMergedFrom, value)
+		})
+	}
+	if _u.mutation.MergedFromCleared() {
+		_spec.ClearField(handoff.FieldMergedFrom, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.TargetThreadID(); ok {
 		_spec.SetField(handoff.FieldTargetThreadID, field.TypeString, value)
 	}
@@ -263,6 +293,24 @@ func (_u *HandoffUpdateOne) SetNillableSourceThreadID(v *string) *HandoffUpdateO
 	if v != nil {
 		_u.SetSourceThreadID(*v)
 	}
+	return _u
+}
+
+// SetMergedFrom sets the "merged_from" field.
+func (_u *HandoffUpdateOne) SetMergedFrom(v []string) *HandoffUpdateOne {
+	_u.mutation.SetMergedFrom(v)
+	return _u
+}
+
+// AppendMergedFrom appends value to the "merged_from" field.
+func (_u *HandoffUpdateOne) AppendMergedFrom(v []string) *HandoffUpdateOne {
+	_u.mutation.AppendMergedFrom(v)
+	return _u
+}
+
+// ClearMergedFrom clears the value of the "merged_from" field.
+func (_u *HandoffUpdateOne) ClearMergedFrom() *HandoffUpdateOne {
+	_u.mutation.ClearMergedFrom()
 	return _u
 }
 
@@ -458,6 +506,17 @@ func (_u *HandoffUpdateOne) sqlSave(ctx context.Context) (_node *Handoff, err er
 	}
 	if value, ok := _u.mutation.SourceThreadID(); ok {
 		_spec.SetField(handoff.FieldSourceThreadID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.MergedFrom(); ok {
+		_spec.SetField(handoff.FieldMergedFrom, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedMergedFrom(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, handoff.FieldMergedFrom, value)
+		})
+	}
+	if _u.mutation.MergedFromCleared() {
+		_spec.ClearField(handoff.FieldMergedFrom, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.TargetThreadID(); ok {
 		_spec.SetField(handoff.FieldTargetThreadID, field.TypeString, value)

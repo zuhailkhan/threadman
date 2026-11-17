@@ -13,6 +13,8 @@ const (
 	FieldID = "id"
 	// FieldSourceThreadID holds the string denoting the source_thread_id field in the database.
 	FieldSourceThreadID = "source_thread_id"
+	// FieldMergedFrom holds the string denoting the merged_from field in the database.
+	FieldMergedFrom = "merged_from"
 	// FieldTargetThreadID holds the string denoting the target_thread_id field in the database.
 	FieldTargetThreadID = "target_thread_id"
 	// FieldTargetProvider holds the string denoting the target_provider field in the database.
@@ -37,6 +39,7 @@ const (
 var Columns = []string{
 	FieldID,
 	FieldSourceThreadID,
+	FieldMergedFrom,
 	FieldTargetThreadID,
 	FieldTargetProvider,
 	FieldMode,

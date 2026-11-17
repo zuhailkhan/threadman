@@ -12,6 +12,7 @@ var (
 	HandoffsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString, Unique: true},
 		{Name: "source_thread_id", Type: field.TypeString},
+		{Name: "merged_from", Type: field.TypeJSON, Nullable: true},
 		{Name: "target_thread_id", Type: field.TypeString},
 		{Name: "target_provider", Type: field.TypeString},
 		{Name: "mode", Type: field.TypeString},

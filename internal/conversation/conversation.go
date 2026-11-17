@@ -56,7 +56,7 @@ func Missed(entries []Entry, provider string) []Entry {
 	since, received := lastReceived(entries, provider)
 	var out []Entry
 	for _, e := range entries {
-		if e.Message.Kind == domain.KindHandoff || e.Provider == provider {
+		if repeats(e.Message) || e.Provider == provider {
 			continue
 		}
 		if received && !e.Message.Timestamp.After(since) {
@@ -73,11 +73,19 @@ func Missed(entries []Entry, provider string) []Entry {
 func Everything(entries []Entry) []Entry {
 	var out []Entry
 	for _, e := range entries {
-		if e.Message.Kind != domain.KindHandoff {
+		if !repeats(e.Message) {
 			out = append(out, e)
 		}
 	}
 	return out
+}
+
+// repeats reports whether m only repeats messages that are on the timeline in
+// their own right, as a handoff block between the conversation's sessions
+// does. A merge block is kept: it carries briefs of threads outside the
+// conversation, which nothing else on the timeline holds.
+func repeats(m domain.Message) bool {
+	return m.Kind == domain.KindHandoff && !domain.IsMergeBlock(m.Content)
 }
 
 // Session returns the session a provider's turns continue in: the one with

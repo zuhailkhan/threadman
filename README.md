@@ -13,6 +13,7 @@ That database is a durable copy. When a tool deletes a session, for example when
 - **Live updates** — optional per-response hooks ingest new messages as you chat, and the TUI refreshes automatically
 - **Thread reader** — scrollable message view with You/Assistant labels
 - **Handoff** — transfer any conversation to a different provider's native session format and open it immediately, as the full transcript or as an LLM-written summary
+- **Merge** — bring several separate threads together into one new session, each briefed with its tool, project and dates
 - **Thread grouping** — threads handed off across providers are grouped into a single row with provider icon clusters `[C O]`; a tool that has deleted its session shows dimmed
 - **Durable history** — conversations survive their tool deleting the session
 - **CLI subcommands** — `sync`, `list`, `search`, `show` for scripting
@@ -135,6 +136,14 @@ threadman llm clear
 
 threadman checks the LLM when it starts and shows the result in the status bar, and checks again each time the mode dialog opens. A conversation too long for the model fails with the provider's error rather than being cut short; hand off the full transcript instead.
 
+### Merging threads
+
+Work on one thing often ends up spread over separate sessions: one started fresh when the context filled up, another tried in a different tool. To continue from all of them, select their rows in the thread list with Space and press `m`, then choose the tool for the new session.
+
+The new session holds one handoff block with a section per thread, oldest first. Each section gives the thread's tool, project, dates and message count, the command to read it in full, and a detailed brief of it (goal, current state, decisions in force, rejected approaches, open questions, next steps). Every thread gets its own brief, so a short one isn't drowned out by a long one. Only the newest thread's last 2 messages are kept word for word, since that is where the work stopped. The block says the threads ran separately and that where they disagree, the later one is more likely to be current.
+
+A merge always writes a new session, which runs in the newest thread's workspace. It needs an LLM, with one call per thread. Up to 8 threads can be merged at once. A row that is already a conversation across tools counts as one thread. The threads merged are left unchanged and stay in the list; the new session is a conversation of its own, titled after the newest thread with "(merged from N)".
+
 ### TUI Keybindings
 
 | Key | Action |
@@ -142,7 +151,7 @@ threadman checks the LLM when it starts and shows the result in the status bar, 
 | ↑ / k | Move up |
 | ↓ / j | Move down |
 | Enter | Open thread |
-| q / Esc | Quit or go back |
+| q / Esc | Quit or go back; Esc in the thread list clears the selection |
 | s | Sync all providers |
 | / | Inline search |
 | a | Archive or unarchive selected thread |
@@ -151,7 +160,8 @@ threadman checks the LLM when it starts and shows the result in the status bar, 
 | d | Delete selected thread |
 | H | Set up ingestion hooks |
 | PgUp / PgDn | Scroll thread |
-| Space | Toggle selection (first-run provider picker, delete picker) |
+| Space | Toggle selection (thread list, first-run provider picker, delete picker) |
+| m | Merge the selected threads into a new session |
 | h | Handoff current thread to another provider |
 | L | Set up the LLM used for handoff summaries |
 | r | Resume current thread in its native provider CLI |

@@ -200,7 +200,7 @@ func (m Model) writeHandoff(ctx context.Context, target handoffTarget, mode hand
 			}
 			record.TargetProvider = w.Name()
 			record.TargetOriginalID = session.OriginalID
-			return handoffWrittenMsg{sessionID: session.OriginalID, writer: w, record: record,
+			return handoffWrittenMsg{sessionID: session.OriginalID, writer: w, record: record, source: root,
 				workspace: session.WorkspacePath, appended: true, count: len(src.Messages)}
 		}
 
@@ -217,15 +217,14 @@ func (m Model) writeHandoff(ctx context.Context, target handoffTarget, mode hand
 		}
 		record.TargetProvider = w.Name()
 		record.TargetOriginalID = id
-		return handoffWrittenMsg{sessionID: id, writer: w, record: record,
+		return handoffWrittenMsg{sessionID: id, writer: w, record: record, source: root,
 			workspace: src.WorkspacePath, count: len(src.Messages)}
 	}
 }
 
 // recordHandoffLink stores the handoff, then re-reads the target tool so the
 // conversation shows the block without waiting for the next sync.
-func (m Model) recordHandoffLink(record domain.Handoff) tea.Cmd {
-	source := m.thread
+func (m Model) recordHandoffLink(source domain.Thread, record domain.Handoff) tea.Cmd {
 	svc := m.svc
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

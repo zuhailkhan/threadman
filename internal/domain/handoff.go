@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -24,10 +25,16 @@ type Handoff struct {
 
 	SourceThreadID string
 
+	// MergedFrom lists, oldest first, the threads a merge brought together
+	// into one new session; SourceThreadID is then the newest of them. It is
+	// empty for an ordinary handoff.
+	MergedFrom []string
+
 	TargetProvider   string
 	TargetOriginalID string
 
-	// Mode is how the source was carried: "full", "detailed" or "light".
+	// Mode is how the source was carried: "full", "detailed", "light", or
+	// "merge" for several threads summarized into one new session.
 	Mode string
 
 	// Summarizer names the LLM that wrote the brief; empty for a full transcript.
@@ -42,6 +49,15 @@ type Handoff struct {
 	Content string
 
 	CreatedAt time.Time
+}
+
+// MergedTitle names the session a merge of n threads writes, after the
+// newest thread's title.
+func MergedTitle(newest string, n int) string {
+	if newest == "" {
+		return fmt.Sprintf("Merged from %d threads", n)
+	}
+	return fmt.Sprintf("%s (merged from %d)", newest, n)
 }
 
 // TargetThreadID is the ID the target session gets once it is synced.
@@ -78,6 +94,21 @@ func ParseHandoffMarker(content string) (id, detail string, ok bool) {
 		return "", "", false
 	}
 	return id, detail, true
+}
+
+// MergeDetail is how a merge block's marker describes it; it begins "merged
+// from".
+func MergeDetail(threads int, tools string, messages int) string {
+	return fmt.Sprintf("%s%d threads · %s · %d messages", mergePrefix, threads, tools, messages)
+}
+
+const mergePrefix = "merged from "
+
+// IsMergeBlock reports whether content is a block threadman wrote to merge
+// several threads into one session.
+func IsMergeBlock(content string) bool {
+	_, detail, ok := ParseHandoffMarker(content)
+	return ok && strings.HasPrefix(detail, mergePrefix)
 }
 
 // IsHandoffMarker reports whether s begins like a handoff block. Providers

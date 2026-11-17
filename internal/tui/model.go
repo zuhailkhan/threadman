@@ -39,6 +39,7 @@ const (
 	stateDeletePicker
 	stateDeleteConfirm
 	stateDeleteTyping
+	stateMergePicker
 )
 
 type onboardingProvider struct {
@@ -63,6 +64,9 @@ type handoffWrittenMsg struct {
 	sessionID string
 	writer    ports.ThreadWriter
 	record    domain.Handoff
+	// source is the thread the record is filed under: the open conversation,
+	// or the newest of the threads merged.
+	source domain.Thread
 	// workspace is where the target session runs.
 	workspace string
 	// appended is set when the messages went into an existing session.
@@ -118,6 +122,13 @@ type Model struct {
 	deleteTargets     []domain.Thread
 	deleteSelected    []bool
 	deleteDraft       string
+	// mergeSelected holds the list rows picked for a merge, by groupKey.
+	mergeSelected map[string]bool
+	// mergeGroups are the rows being merged, oldest first.
+	mergeGroups []ThreadGroup
+	// merging is set from starting a merge until its result is dismissed,
+	// so the shared handoff dialogs return to the list.
+	merging bool
 }
 
 type ThreadGroup struct {
@@ -482,12 +493,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handoffCount = msg.count
 		m.status = ""
 		m.state = stateHandoffConfirm
-		return m, m.recordHandoffLink(msg.record)
+		if m.merging {
+			m.mergeSelected = nil
+		}
+		return m, m.recordHandoffLink(msg.source, msg.record)
 
 	case handoffErrMsg:
 		m.handoffCancel = nil
 		if errors.Is(msg.err, context.Canceled) {
 			// the user pressed Esc; the state was already reset
+			return m, nil
+		}
+		if m.merging {
+			// The selection is kept so the merge can be retried.
+			m.status = "merge error: " + msg.err.Error()
+			m.merging = false
+			m.state = stateList
 			return m, nil
 		}
 		m.status = "handoff error: " + msg.err.Error()
@@ -603,6 +624,26 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.setupHooksCmd()
 		case "L":
 			m.openLLMSetup()
+		case " ":
+			if len(m.filteredGroups) == 0 {
+				return m, nil
+			}
+			key := groupKey(m.filteredGroups[m.cursor])
+			if m.mergeSelected == nil {
+				m.mergeSelected = map[string]bool{}
+			}
+			if m.mergeSelected[key] {
+				delete(m.mergeSelected, key)
+			} else {
+				m.mergeSelected[key] = true
+			}
+			if m.cursor < len(m.filteredGroups)-1 {
+				m.cursor++
+			}
+		case "m":
+			return m, m.startMerge()
+		case "esc":
+			m.mergeSelected = nil
 		case "/":
 			m.state = stateSearch
 			m.query = ""
@@ -742,6 +783,33 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case stateLLMSetup:
 		return m.handleLLMSetupKey(msg)
 
+	case stateMergePicker:
+		switch msg.String() {
+		case "esc", "q":
+			m.state = stateList
+		case "L":
+			m.openLLMSetup()
+		case "up", "k":
+			if m.handoffCursor > 0 {
+				m.handoffCursor--
+			}
+		case "down", "j":
+			if m.handoffCursor < len(m.writers)-1 {
+				m.handoffCursor++
+			}
+		case "enter":
+			if m.llmChecking || !m.llmStatus.Ready() {
+				return m, nil
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			m.handoffCancel = cancel
+			m.handoffMode = handoff.ModeDetailed
+			m.merging = true
+			m.status = ""
+			m.state = stateHandoffWorking
+			return m, m.writeMerge(ctx, m.writers[m.handoffCursor], m.mergeGroups)
+		}
+
 	case stateHandoffMode:
 		switch msg.String() {
 		case "esc", "q":
@@ -783,18 +851,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.status = "handoff cancelled"
 			m.state = stateThread
+			if m.merging {
+				m.status = "merge cancelled"
+				m.merging = false
+				m.state = stateList
+			}
 		}
 
 	case stateHandoffConfirm:
+		back := stateThread
+		if m.merging {
+			back = stateList
+		}
 		switch msg.String() {
 		case "y", "Y":
-			m.state = stateThread
+			m.state = back
+			m.merging = false
 			m.status = ""
 			return m, launch(m.handoffTarget.OpenCommand(m.handoffSessionID, m.handoffWorkspace))
 		case "n", "N", "esc":
 			openCmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.handoffWorkspace)
 			m.status = "run: " + strings.Join(openCmd.Args, " ")
-			m.state = stateThread
+			m.state = back
+			m.merging = false
 		}
 
 	case stateDeletePicker:
@@ -994,6 +1073,8 @@ func (m Model) View() string {
 		return m.viewDeleteConfirm()
 	case stateDeleteTyping:
 		return m.viewDeleteTyping()
+	case stateMergePicker:
+		return m.viewMergePicker()
 	default:
 		return m.viewList()
 	}
@@ -1189,7 +1270,10 @@ func (m Model) viewHandoffWorking() string {
 	dialogWidth := 56
 
 	line := "  Writing session…"
-	if m.handoffMode.NeedsLLM() {
+	switch {
+	case m.merging:
+		line = fmt.Sprintf("  Summarizing %d threads with %s…", len(m.mergeGroups), m.llmStatus.Label)
+	case m.handoffMode.NeedsLLM():
 		line = "  Summarizing with " + m.llmStatus.Label + "…"
 	}
 
@@ -1255,7 +1339,9 @@ func (m Model) viewHandoffConfirm() string {
 	}
 
 	var prompt string
-	if m.handoffAppended {
+	if m.merging {
+		prompt = fmt.Sprintf("  Merged %d threads into a new %s session.\n  Open it now?", m.handoffCount, label)
+	} else if m.handoffAppended {
 		noun := "messages"
 		if m.handoffCount == 1 {
 			noun = "message"
@@ -1389,7 +1475,7 @@ func (m Model) viewList() string {
 	if m.showArchived {
 		archivedHint = "[A]hide-archived"
 	}
-	hints := styleHint.Render("[s]sync [/]search [d]del [n]ren [a]arch " + archivedHint + " [L]llm [q]quit")
+	hints := styleHint.Render("[s]sync [/]search [m]merge [d]del [n]ren [a]arch " + archivedHint + " [L]llm [q]quit")
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(hints)
 	if gap < 1 {
 		gap = 1
@@ -1418,9 +1504,16 @@ func (m Model) viewList() string {
 	for i := start; i < len(m.filteredGroups) && i < start+listHeight; i++ {
 		g := m.filteredGroups[i]
 		cursor := "  "
+		picked := m.mergeSelected[groupKey(g)]
+		if picked {
+			cursor = styleCursor.Render(" ✓")
+		}
 		row := renderListRow(i+1, g, m.width)
 		if i == m.cursor {
 			cursor = styleCursor.Render("▶ ")
+			if picked {
+				cursor = styleCursor.Render("▶✓")
+			}
 			row = styleSelected.Width(m.width - 2).Render(row)
 		} else if g.Primary.Archived {
 			row = styleArchived.Render(row)
@@ -1440,7 +1533,11 @@ func (m Model) viewList() string {
 		statusLine = m.status
 	} else {
 		count := fmt.Sprintf("%d threads  ·  %s", len(m.filteredGroups), m.llmSummary())
-		nav := "↑↓ navigate  Enter open"
+		nav := "↑↓ navigate  Enter open  Space select"
+		if n := len(m.mergeSelected); n > 0 {
+			count = fmt.Sprintf("%d selected  ·  %s", n, m.llmSummary())
+			nav = "Space select  m merge  Esc clear"
+		}
 		statusGap := m.width - lipgloss.Width(count) - lipgloss.Width(nav) - 2
 		if statusGap < 1 {
 			statusGap = 1

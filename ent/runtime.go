@@ -16,11 +16,11 @@ func init() {
 	handoffFields := schema.Handoff{}.Fields()
 	_ = handoffFields
 	// handoffDescSummarizer is the schema descriptor for summarizer field.
-	handoffDescSummarizer := handoffFields[5].Descriptor()
+	handoffDescSummarizer := handoffFields[6].Descriptor()
 	// handoff.DefaultSummarizer holds the default value on creation for the summarizer field.
 	handoff.DefaultSummarizer = handoffDescSummarizer.Default.(string)
 	// handoffDescSourceLastMessageID is the schema descriptor for source_last_message_id field.
-	handoffDescSourceLastMessageID := handoffFields[7].Descriptor()
+	handoffDescSourceLastMessageID := handoffFields[8].Descriptor()
 	// handoff.DefaultSourceLastMessageID holds the default value on creation for the source_last_message_id field.
 	handoff.DefaultSourceLastMessageID = handoffDescSourceLastMessageID.Default.(string)
 	messageFields := schema.Message{}.Fields()

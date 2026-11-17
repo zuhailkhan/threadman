@@ -162,3 +162,19 @@ func TestEverythingLeavesOutBlocks(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+// A merge block holds briefs of threads outside the conversation, so a tool
+// handed a merged session needs it; an ordinary block only repeats messages.
+func TestMergeBlockIsCarried(t *testing.T) {
+	merge := domain.Message{ID: "m", Role: domain.RoleUser, Timestamp: at(1), Kind: domain.KindHandoff, HandoffID: "m",
+		Content: domain.HandoffMarker("m", domain.MergeDetail(2, "Claude Code and pi", 9)) + "\nbriefs"}
+	pi := domain.Thread{ID: "pi-1", Provider: "pi", Messages: []domain.Message{merge, msg(2, "p2"), msg(3, "p3")}}
+	claude := domain.Thread{ID: "claude-1", Provider: "claude", Messages: []domain.Message{block(4, "h1"), msg(5, "c5")}}
+	threads := []domain.Thread{pi, claude}
+
+	got := contents(Everything(Timeline(threads)))
+	if want := []string{merge.Content, "p2", "p3", "c5"}; !slices.Equal(got, want) {
+		t.Errorf("Everything = %q, want %q", got, want)
+	}
+	assertMissed(t, []domain.Thread{pi}, "opencode", merge.Content, "p2", "p3")
+}

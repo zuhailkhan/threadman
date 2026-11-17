@@ -15,6 +15,8 @@ func (Handoff) Fields() []ent.Field {
 	return []ent.Field{
 		field.String("id").Unique(),
 		field.String("source_thread_id"),
+		// merged_from lists the threads a merge brought together, oldest first.
+		field.Strings("merged_from").Optional(),
 		field.String("target_thread_id"),
 		field.String("target_provider"),
 		field.String("mode"),

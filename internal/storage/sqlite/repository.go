@@ -249,7 +249,8 @@ func (r *Repository) SearchMessages(ctx context.Context, query string) ([]domain
 
 // RecordHandoff stores h and links its target session into the source's
 // group. The target thread is created as an empty stub until its session is
-// synced; a target that is already stored keeps its messages.
+// synced; a target that is already stored keeps its messages. A merge's
+// target is not linked to any group.
 func (r *Repository) RecordHandoff(ctx context.Context, source domain.Thread, h domain.Handoff) error {
 	if h.ID == "" || h.TargetProvider == "" || h.TargetOriginalID == "" {
 		return fmt.Errorf("handoff record is missing its ID or target")
@@ -261,6 +262,7 @@ func (r *Repository) RecordHandoff(ctx context.Context, source domain.Thread, h 
 	if err := r.client.Handoff.Create().
 		SetID(h.ID).
 		SetSourceThreadID(source.ID).
+		SetMergedFrom(h.MergedFrom).
 		SetTargetThreadID(h.TargetThreadID()).
 		SetTargetProvider(h.TargetProvider).
 		SetMode(h.Mode).
@@ -271,6 +273,10 @@ func (r *Repository) RecordHandoff(ctx context.Context, source domain.Thread, h 
 		SetCreatedAt(createdAt).
 		Exec(ctx); err != nil {
 		return fmt.Errorf("save handoff: %w", err)
+	}
+
+	if len(h.MergedFrom) > 0 {
+		return r.recordMergeTarget(ctx, source, h)
 	}
 
 	rootID := source.CanonicalID
@@ -308,6 +314,32 @@ func (r *Repository) RecordHandoff(ctx context.Context, source domain.Thread, h 
 	return r.UpsertThread(ctx, stub)
 }
 
+// recordMergeTarget stores the session a merge wrote as a conversation of its
+// own. It is not linked into any source's group: the sources ran separately
+// and never saw each other, so they don't form one timeline. source is the
+// newest of them; the stub takes its workspace.
+func (r *Repository) recordMergeTarget(ctx context.Context, source domain.Thread, h domain.Handoff) error {
+	targetID := h.TargetThreadID()
+	exists, err := r.client.Thread.Query().Where(thread.ID(targetID)).Exist(ctx)
+	if err != nil || exists {
+		return err
+	}
+	title := source.CustomTitle
+	if title == "" {
+		title = source.Title
+	}
+	stub := domain.Thread{
+		ID:            targetID,
+		Provider:      h.TargetProvider,
+		OriginalID:    h.TargetOriginalID,
+		Title:         domain.MergedTitle(title, len(h.MergedFrom)),
+		WorkspacePath: source.WorkspacePath,
+		CreatedAt:     time.Now(),
+		LastSyncedAt:  time.Now(),
+	}
+	return r.UpsertThread(ctx, stub)
+}
+
 // GetHandoff returns the stored record of one handoff.
 func (r *Repository) GetHandoff(ctx context.Context, id string) (domain.Handoff, error) {
 	e, err := r.client.Handoff.Get(ctx, id)
@@ -318,6 +350,7 @@ func (r *Repository) GetHandoff(ctx context.Context, id string) (domain.Handoff,
 	return domain.Handoff{
 		ID:                  e.ID,
 		SourceThreadID:      e.SourceThreadID,
+		MergedFrom:          e.MergedFrom,
 		TargetProvider:      provider,
 		TargetOriginalID:    strings.TrimPrefix(e.TargetThreadID, provider+"-"),
 		Mode:                e.Mode,

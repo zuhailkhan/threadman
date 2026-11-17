@@ -174,6 +174,16 @@ func SourceThreadIDContainsFold(v string) predicate.Handoff {
 	return predicate.Handoff(sql.FieldContainsFold(FieldSourceThreadID, v))
 }
 
+// MergedFromIsNil applies the IsNil predicate on the "merged_from" field.
+func MergedFromIsNil() predicate.Handoff {
+	return predicate.Handoff(sql.FieldIsNull(FieldMergedFrom))
+}
+
+// MergedFromNotNil applies the NotNil predicate on the "merged_from" field.
+func MergedFromNotNil() predicate.Handoff {
+	return predicate.Handoff(sql.FieldNotNull(FieldMergedFrom))
+}
+
 // TargetThreadIDEQ applies the EQ predicate on the "target_thread_id" field.
 func TargetThreadIDEQ(v string) predicate.Handoff {
 	return predicate.Handoff(sql.FieldEQ(FieldTargetThreadID, v))
