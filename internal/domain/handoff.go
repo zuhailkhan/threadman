@@ -120,10 +120,12 @@ func IsHandoffMarker(s string) bool {
 
 // ProviderLabels are the display names of the providers threadman knows.
 var ProviderLabels = map[string]string{
-	"claude":   "Claude Code",
-	"gemini":   "Gemini CLI",
-	"opencode": "OpenCode",
-	"pi":       "pi",
+	"claude":      "Claude Code",
+	"gemini":      "Gemini CLI",
+	"opencode":    "OpenCode",
+	"pi":          "pi",
+	"antigravity": "Antigravity",
+	"codex":       "Codex",
 }
 
 // ProviderLabel returns a provider's display name, or its ID when unknown.

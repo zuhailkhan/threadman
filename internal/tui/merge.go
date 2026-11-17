@@ -109,7 +109,7 @@ func (m *Model) startMerge() tea.Cmd {
 	case n > handoff.MaxMergeThreads:
 		m.status = fmt.Sprintf("a merge takes at most %d threads; %d are selected", handoff.MaxMergeThreads, n)
 		return nil
-	case len(m.writers) == 0:
+	case len(m.targetWriters()) == 0:
 		m.status = "no tool to write the merged session into"
 		return nil
 	}
@@ -127,7 +127,7 @@ func (m Model) viewMergePicker() string {
 	inner.WriteString("\n")
 	inner.WriteString(fmt.Sprintf("  Merge %d threads into a new session in:\n", len(m.mergeGroups)))
 	inner.WriteString("\n")
-	for i, w := range m.writers {
+	for i, w := range m.targetWriters() {
 		label := domain.ProviderLabel(w.Name())
 		if i == m.handoffCursor {
 			inner.WriteString(styleCursor.Render("▶") + " " + label + "\n")

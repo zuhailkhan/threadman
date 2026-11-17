@@ -794,7 +794,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.handoffCursor--
 			}
 		case "down", "j":
-			if m.handoffCursor < len(m.writers)-1 {
+			if m.handoffCursor < len(m.targetWriters())-1 {
 				m.handoffCursor++
 			}
 		case "enter":
@@ -807,7 +807,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.merging = true
 			m.status = ""
 			m.state = stateHandoffWorking
-			return m, m.writeMerge(ctx, m.writers[m.handoffCursor], m.mergeGroups)
+			return m, m.writeMerge(ctx, m.targetWriters()[m.handoffCursor], m.mergeGroups)
 		}
 
 	case stateHandoffMode:

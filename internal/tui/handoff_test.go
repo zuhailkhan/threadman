@@ -201,3 +201,21 @@ func TestHandoffCancel(t *testing.T) {
 		t.Errorf("cancelled handoff still wrote a session")
 	}
 }
+
+type readOnlyWriter struct{ fakeWriter }
+
+func (w *readOnlyWriter) ReadOnly() bool { return true }
+
+func TestReadOnlyWriterIsNotAHandoffTarget(t *testing.T) {
+	m := Model{
+		writers:      []ports.ThreadWriter{&fakeWriter{name: "claude"}, &readOnlyWriter{fakeWriter{name: "antigravity"}}},
+		groupThreads: []domain.Thread{{ID: "pi-1", Provider: "pi", Messages: []domain.Message{{Role: domain.RoleUser, Content: "hi"}}}},
+	}
+	targets := m.handoffTargetsFor()
+	if len(targets) != 1 || targets[0].writer.Name() != "claude" {
+		t.Fatalf("got %d targets, want only claude", len(targets))
+	}
+	if ws := m.targetWriters(); len(ws) != 1 || ws[0].Name() != "claude" {
+		t.Errorf("merge targets = %v", ws)
+	}
+}

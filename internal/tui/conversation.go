@@ -39,13 +39,27 @@ func (t handoffTarget) status() string {
 	}
 }
 
+// targetWriters lists the tools a session can be written into. Some providers
+// can be read and resumed but not written to.
+func (m Model) targetWriters() []ports.ThreadWriter {
+	out := make([]ports.ThreadWriter, 0, len(m.writers))
+	for _, w := range m.writers {
+		if ro, ok := w.(interface{ ReadOnly() bool }); ok && ro.ReadOnly() {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
 // handoffTargetsFor lists every tool the open conversation can be handed to.
 // A tool that already has a session in it is caught up on what it missed; any
 // other gets a new session with the whole conversation.
 func (m Model) handoffTargetsFor() []handoffTarget {
 	entries := conversation.Timeline(m.groupThreads)
-	targets := make([]handoffTarget, 0, len(m.writers))
-	for _, w := range m.writers {
+	writers := m.targetWriters()
+	targets := make([]handoffTarget, 0, len(writers))
+	for _, w := range writers {
 		t := handoffTarget{writer: w}
 		if s, ok := conversation.Session(m.groupThreads, w.Name()); ok {
 			t.session = &s

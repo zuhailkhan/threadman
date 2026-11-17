@@ -10,7 +10,9 @@ import (
 	"github.com/zuhailkhan/threadman/internal/handoff"
 	"github.com/zuhailkhan/threadman/internal/llm"
 	"github.com/zuhailkhan/threadman/internal/ports"
+	"github.com/zuhailkhan/threadman/internal/providers/antigravity"
 	"github.com/zuhailkhan/threadman/internal/providers/claude"
+	"github.com/zuhailkhan/threadman/internal/providers/codex"
 	"github.com/zuhailkhan/threadman/internal/providers/opencode"
 	"github.com/zuhailkhan/threadman/internal/providers/pi"
 	"github.com/zuhailkhan/threadman/internal/storage/sqlite"
@@ -43,12 +45,16 @@ func main() {
 		claude.NewProvider(),
 		opencode.NewProvider(),
 		pi.NewProvider(),
+		antigravity.NewProvider(),
+		codex.NewProvider(),
 	}, repo)
 
 	writers := []ports.ThreadWriter{
 		claude.NewWriter(),
 		opencode.NewWriter(),
 		pi.NewWriter(),
+		antigravity.NewWriter(),
+		codex.NewWriter(),
 	}
 
 	cfgPath, err := llm.DefaultPath()
