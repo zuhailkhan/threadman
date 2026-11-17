@@ -1,6 +1,6 @@
 # threadman
 
-`threadman` is a terminal interface for managing AI conversation threads across Claude Code, OpenCode, pi and Antigravity — browse, search, and hand off a conversation from one provider to another.
+`threadman` is a terminal interface for managing AI conversation threads across Claude Code, OpenCode, pi, Antigravity and Codex — browse, search, and hand off a conversation from one provider to another.
 
 threadman reads the session files your CLIs already write and indexes them into a SQLite database at `~/.local/share/threadman/threads.db`. The only network calls it makes are to the summarization LLM you configure for summary handoffs; with a local model, nothing leaves your machine.
 
@@ -9,7 +9,7 @@ That database is a durable copy. When a tool deletes a session, for example when
 ## Features
 
 - **Interactive TUI** — full-screen thread browser with colors, navigation, and inline search
-- **Multi-provider import** — reads local session files from Claude Code, OpenCode, pi and Antigravity; first run lets you pick which providers to import
+- **Multi-provider import** — reads local session files from Claude Code, OpenCode, pi, Antigravity and Codex; first run lets you pick which providers to import
 - **Live updates** — optional per-response hooks ingest new messages as you chat, and the TUI refreshes automatically
 - **Thread reader** — scrollable message view with You/Assistant labels
 - **Handoff** — transfer any conversation to a different provider's native session format and open it immediately, as the full transcript or as an LLM-written summary
@@ -30,8 +30,11 @@ That database is a durable copy. When a tool deletes a session, for example when
 | OpenCode (1.x and 2.x) | `~/.local/share/opencode/opencode.db` |
 | [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | `~/.pi/agent/sessions/**/*.jsonl` |
 | Antigravity CLI (read and resume only) | `~/.gemini/antigravity-cli/conversations/*.db` |
+| Codex | `~/.codex/sessions/**/rollout-*.jsonl` (and `.jsonl.zst`) |
 
 Handoff works in both directions with pi: a thread handed to pi is written as a native pi session and opened with `pi --session <id>`. For branched pi sessions, only the active branch is shown. `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` are respected.
+
+Handoff works in both directions with Codex: a thread handed to Codex is written as a native session and opened with `codex resume <id>`. `CODEX_HOME` is respected. Sessions Codex compressed to `.jsonl.zst` are read as they are; sub-agent sessions and archived sessions are not imported. There is no per-response hook for Codex yet, so press `s` to pick up new messages.
 
 Antigravity conversations can be browsed, searched, resumed (`agy --conversation <id>`) and handed off to another provider, but not handed off *to* or deleted: Antigravity stores them in an undocumented binary format that threadman only reads. There is no per-response hook for it yet, so press `s` to pick up new messages.
 
@@ -173,7 +176,6 @@ A merge always writes a new session, which runs in the newest thread's workspace
 
 Providers are added one at a time. Planned, in no fixed order:
 
-- [ ] Codex
 - [ ] GitHub Copilot CLI
 - [ ] Cursor
 - [ ] Amp
@@ -186,6 +188,7 @@ Providers are added one at a time. Planned, in no fixed order:
 - [ ] Kimi CLI
 - [ ] Qwen Code
 - [ ] Antigravity: handoff target and per-response hook
+- [ ] Codex: per-response hook
 
 ## Installation
 
@@ -221,7 +224,7 @@ threadman/
 ├── internal/
 │   ├── domain/           # Core models: Thread, Message, Role
 │   ├── ports/            # Interfaces: ThreadProvider, ThreadRepository
-│   ├── providers/        # Claude, OpenCode, pi, Antigravity integrations
+│   ├── providers/        # Claude, OpenCode, pi, Antigravity, Codex integrations
 │   ├── storage/sqlite/   # SQLite persistence (ent ORM)
 │   ├── sync/             # Sync service: discover → hydrate → upsert
 │   ├── hooks/            # Provider hook and plugin setup

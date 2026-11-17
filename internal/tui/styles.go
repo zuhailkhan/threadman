@@ -12,6 +12,7 @@ var (
 	colorOpenCode    = lipgloss.Color("#9B59B6")
 	colorPi          = lipgloss.Color("#E67E22")
 	colorAntigravity = lipgloss.Color("#E84393")
+	colorCodex       = lipgloss.Color("#10A37F")
 	colorDefault     = lipgloss.Color("#888888")
 	colorAmber       = lipgloss.Color("#F5A623")
 	colorGreen       = lipgloss.Color("#7ED321")
@@ -54,6 +55,8 @@ func providerIcon(name string) string {
 		return "P"
 	case "antigravity":
 		return "A"
+	case "codex":
+		return "X"
 	default:
 		if len(name) > 0 {
 			return strings.ToUpper(name[:1])
@@ -75,6 +78,8 @@ func providerStyle(name string) lipgloss.Style {
 		color = colorPi
 	case "antigravity":
 		color = colorAntigravity
+	case "codex":
+		color = colorCodex
 	default:
 		color = colorDefault
 	}

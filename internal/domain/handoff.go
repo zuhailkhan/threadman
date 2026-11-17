@@ -125,6 +125,7 @@ var ProviderLabels = map[string]string{
 	"opencode":    "OpenCode",
 	"pi":          "pi",
 	"antigravity": "Antigravity",
+	"codex":       "Codex",
 }
 
 // ProviderLabel returns a provider's display name, or its ID when unknown.

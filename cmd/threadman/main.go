@@ -12,6 +12,7 @@ import (
 	"github.com/zuhailkhan/threadman/internal/ports"
 	"github.com/zuhailkhan/threadman/internal/providers/antigravity"
 	"github.com/zuhailkhan/threadman/internal/providers/claude"
+	"github.com/zuhailkhan/threadman/internal/providers/codex"
 	"github.com/zuhailkhan/threadman/internal/providers/opencode"
 	"github.com/zuhailkhan/threadman/internal/providers/pi"
 	"github.com/zuhailkhan/threadman/internal/storage/sqlite"
@@ -45,6 +46,7 @@ func main() {
 		opencode.NewProvider(),
 		pi.NewProvider(),
 		antigravity.NewProvider(),
+		codex.NewProvider(),
 	}, repo)
 
 	writers := []ports.ThreadWriter{
@@ -52,6 +54,7 @@ func main() {
 		opencode.NewWriter(),
 		pi.NewWriter(),
 		antigravity.NewWriter(),
+		codex.NewWriter(),
 	}
 
 	cfgPath, err := llm.DefaultPath()
