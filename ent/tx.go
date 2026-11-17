@@ -12,6 +12,8 @@ import (
 // Tx is a transactional client that is created by calling Client.Tx().
 type Tx struct {
 	config
+	// Handoff is the client for interacting with the Handoff builders.
+	Handoff *HandoffClient
 	// Message is the client for interacting with the Message builders.
 	Message *MessageClient
 	// Thread is the client for interacting with the Thread builders.
@@ -147,6 +149,7 @@ func (tx *Tx) Client() *Client {
 }
 
 func (tx *Tx) init() {
+	tx.Handoff = NewHandoffClient(tx.config)
 	tx.Message = NewMessageClient(tx.config)
 	tx.Thread = NewThreadClient(tx.config)
 }
@@ -158,7 +161,7 @@ func (tx *Tx) init() {
 // of them in order to commit or rollback the transaction.
 //
 // If a closed transaction is embedded in one of the generated entities, and the entity
-// applies a query, for example: Message.QueryXXX(), the query will be executed
+// applies a query, for example: Handoff.QueryXXX(), the query will be executed
 // through the driver which created this transaction.
 //
 // Note that txDriver is not goroutine safe.

@@ -30,9 +30,13 @@ type ThreadRepository interface {
 
 	CountThreads(ctx context.Context) (int, error)
 
-	DeleteThreadsNotIn(ctx context.Context, provider string, ids []string) error
+	// MarkMissingNotIn flags the provider's threads not in ids as gone from
+	// their tool, keeping them and their messages.
+	MarkMissingNotIn(ctx context.Context, provider string, ids []string) error
 
-	RecordHandoff(ctx context.Context, source domain.Thread, targetProvider, targetOriginalID string) error
+	RecordHandoff(ctx context.Context, source domain.Thread, h domain.Handoff) error
+
+	GetHandoff(ctx context.Context, id string) (domain.Handoff, error)
 
 	MarkThreadDeleted(ctx context.Context, id, hash string) error
 
@@ -60,6 +64,9 @@ type HookIngester interface {
 type ThreadWriter interface {
 	Name() string
 	WriteThread(ctx context.Context, thread domain.Thread) (string, error)
+	// AppendMessages adds messages to the end of an existing session, which
+	// then resumes with them as its most recent history.
+	AppendMessages(ctx context.Context, target domain.Thread, messages []domain.Message) error
 	OpenCommand(sessionID string, workspacePath string) *exec.Cmd
 	DeleteThread(ctx context.Context, thread domain.Thread) error
 }

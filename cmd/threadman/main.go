@@ -32,7 +32,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	repo, err := sqlite.NewRepository(filepath.Join(dbDir, "threads.db") + "?_fk=1")
+	// Hooks and the TUI can write at the same moment; the busy timeout makes
+	// one wait for the other instead of failing with "database is locked".
+	repo, err := sqlite.NewRepository(filepath.Join(dbDir, "threads.db") + "?_fk=1&_busy_timeout=5000")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error opening store: %v\n", err)
 		os.Exit(1)

@@ -9,6 +9,18 @@ import (
 	"github.com/zuhailkhan/threadman/ent"
 )
 
+// The HandoffFunc type is an adapter to allow the use of ordinary
+// function as Handoff mutator.
+type HandoffFunc func(context.Context, *ent.HandoffMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f HandoffFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.HandoffMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.HandoffMutation", m)
+}
+
 // The MessageFunc type is an adapter to allow the use of ordinary
 // function as Message mutator.
 type MessageFunc func(context.Context, *ent.MessageMutation) (ent.Value, error)

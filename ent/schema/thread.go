@@ -25,6 +25,9 @@ func (Thread) Fields() []ent.Field {
 		field.Bool("archived").Default(false),
 		field.Bool("deleted").Default(false),
 		field.String("deleted_hash").Default(""),
+		// Set when the tool no longer has the session. threadman keeps its
+		// copy, so the conversation stays readable.
+		field.Bool("source_missing").Default(false),
 	}
 }
 

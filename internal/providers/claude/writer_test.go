@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -204,5 +205,78 @@ func TestClaudeWriterDeleteThreadMissingFile(t *testing.T) {
 	err := w.DeleteThread(context.Background(), thread)
 	if err == nil {
 		t.Error("expected error deleting nonexistent file, got nil")
+	}
+}
+
+func TestClaudeWriterAppendMessagesChainsFromLastEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sess-1.jsonl")
+	// A session as current Claude Code writes it: bookkeeping lines without a
+	// uuid, a subagent sidechain, and no newline after the last line.
+	lines := []string{
+		`{"type":"session-owner","sessionId":"sess-1"}`,
+		`{"type":"user","uuid":"u1","parentUuid":null,"isSidechain":false,"sessionId":"sess-1","cwd":"/work","timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":"hello"}}`,
+		`{"type":"assistant","uuid":"a1","parentUuid":"u1","isSidechain":false,"sessionId":"sess-1","cwd":"/work","timestamp":"2026-01-01T00:00:02Z","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"hi"}]}}`,
+		`{"type":"assistant","uuid":"side","parentUuid":"a1","isSidechain":true,"sessionId":"sess-1","timestamp":"2026-01-01T00:00:03Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"subagent"}]}}`,
+		`{"type":"last-prompt","leafUuid":"a1","sessionId":"sess-1"}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	w := &Writer{baseDir: dir}
+	target := domain.Thread{OriginalID: "sess-1", WorkspacePath: "/work", SourceFilePath: path}
+	err := w.AppendMessages(context.Background(), target, []domain.Message{
+		{Role: domain.RoleUser, Content: "[threadman handoff h1]\nblock", Timestamp: time.Unix(5000, 0)},
+	})
+	if err != nil {
+		t.Fatalf("AppendMessages: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(all) != len(lines)+1 {
+		t.Fatalf("got %d lines, want %d:\n%s", len(all), len(lines)+1, data)
+	}
+	if all[len(lines)-1] != lines[len(lines)-1] {
+		t.Errorf("existing lines were changed")
+	}
+	var e struct {
+		Type       string `json:"type"`
+		ParentUUID string `json:"parentUuid"`
+		SessionID  string `json:"sessionId"`
+		Message    struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(all[len(all)-1]), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Type != "user" || e.ParentUUID != "a1" || e.SessionID != "sess-1" || e.Message.Content != "[threadman handoff h1]\nblock" {
+		t.Errorf("appended entry = %+v; want a user entry chained from a1, skipping the sidechain", e)
+	}
+
+	// The provider reads the appended message as the last of the session.
+	p := &Provider{baseDir: dir}
+	full, err := p.GetThreadDetails(context.Background(), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(full.Messages); n == 0 || full.Messages[n-1].Content != "[threadman handoff h1]\nblock" {
+		t.Errorf("messages after append: %+v", full.Messages)
+	}
+}
+
+func TestClaudeWriterAppendMessagesNeedsAnEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"session-owner"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := (&Writer{}).AppendMessages(context.Background(), domain.Thread{SourceFilePath: path}, []domain.Message{{Role: domain.RoleUser, Content: "x"}})
+	if err == nil {
+		t.Error("appending to a session with no conversation entries should fail")
 	}
 }

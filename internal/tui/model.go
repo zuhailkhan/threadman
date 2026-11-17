@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -37,6 +39,7 @@ const (
 	stateDeletePicker
 	stateDeleteConfirm
 	stateDeleteTyping
+	stateMergePicker
 )
 
 type onboardingProvider struct {
@@ -46,16 +49,30 @@ type onboardingProvider struct {
 }
 
 type syncDoneMsg struct{ results []syncsvc.SyncResult }
-type threadLoadedMsg struct{ thread domain.Thread }
-type threadRefreshedMsg struct{ thread domain.Thread }
 type backgroundThreadsMsg []domain.Thread
 type hookSetupDoneMsg struct{ errs []error }
 type dbChangedMsg struct{}
 type errMsg struct{ err error }
+
+// launchDoneMsg reports a tool session that threadman started has exited.
+type launchDoneMsg struct {
+	command string
+	err     error
+}
 type countMsg int
 type handoffWrittenMsg struct {
 	sessionID string
 	writer    ports.ThreadWriter
+	record    domain.Handoff
+	// source is the thread the record is filed under: the open conversation,
+	// or the newest of the threads merged.
+	source domain.Thread
+	// workspace is where the target session runs.
+	workspace string
+	// appended is set when the messages went into an existing session.
+	appended bool
+	// count is how many messages were carried.
+	count int
 }
 type handoffErrMsg struct{ err error }
 type handoffLinkErrMsg struct{ err error }
@@ -81,22 +98,37 @@ type Model struct {
 	onboardingCursor    int
 	writers             []ports.ThreadWriter
 	handoffCursor       int
-	handoffTargets      []ports.ThreadWriter
+	handoffTargets      []handoffTarget
+	handoffChoice       handoffTarget
 	handoffTarget       ports.ThreadWriter
 	handoffSessionID    string
-	handoffModeCursor   int
-	handoffMode         handoff.Mode
-	handoffCancel       context.CancelFunc
-	summarizer          *handoff.Summarizer
-	llmStatus           handoff.Status
-	llmChecking         bool
-	llmSetup            llmSetupForm
-	resumeCursor        int
-	showArchived        bool
-	renameDraft         string
-	deleteTargets       []domain.Thread
-	deleteSelected      []bool
-	deleteDraft         string
+	handoffWorkspace    string
+	handoffAppended     bool
+	handoffCount        int
+	// handoffFullSize is the size of the full-transcript block for the chosen
+	// target, and handoffFullFits whether it is within the block budget.
+	handoffFullSize   int
+	handoffFullFits   bool
+	handoffModeCursor int
+	handoffMode       handoff.Mode
+	handoffCancel     context.CancelFunc
+	summarizer        *handoff.Summarizer
+	llmStatus         handoff.Status
+	llmChecking       bool
+	llmSetup          llmSetupForm
+	resumeCursor      int
+	showArchived      bool
+	renameDraft       string
+	deleteTargets     []domain.Thread
+	deleteSelected    []bool
+	deleteDraft       string
+	// mergeSelected holds the list rows picked for a merge, by groupKey.
+	mergeSelected map[string]bool
+	// mergeGroups are the rows being merged, oldest first.
+	mergeGroups []ThreadGroup
+	// merging is set from starting a merge until its result is dismissed,
+	// so the shared handoff dialogs return to the list.
+	merging bool
 }
 
 type ThreadGroup struct {
@@ -144,26 +176,29 @@ func buildGroups(threads []domain.Thread) []ThreadGroup {
 func providerIcons(g ThreadGroup) string {
 	seen := map[string]bool{g.Primary.Provider: true}
 	providers := []string{g.Primary.Provider}
-	for _, m := range g.Members {
+	live := map[string]bool{}
+	for _, m := range append([]domain.Thread{g.Primary}, g.Members...) {
 		if !seen[m.Provider] {
 			seen[m.Provider] = true
 			providers = append(providers, m.Provider)
 		}
+		if !m.SourceMissing {
+			live[m.Provider] = true
+		}
 	}
 	parts := make([]string, len(providers))
 	for i, p := range providers {
-		parts[i] = providerStyle(p).Render(providerIcon(p))
+		// A tool that no longer has any of the sessions shows dimmed.
+		style := providerStyle(p)
+		if !live[p] {
+			style = styleArchived
+		}
+		parts[i] = style.Render(providerIcon(p))
 	}
 	return "[" + strings.Join(parts, " ") + "]"
 }
 
-var providerLabels = map[string]string{
-	"claude":      "Claude Code",
-	"gemini":      "Gemini CLI",
-	"opencode":    "OpenCode",
-	"pi":          "pi",
-	"antigravity": "Antigravity",
-}
+var providerLabels = domain.ProviderLabels
 
 func New(svc *syncsvc.Service, dbPath string, writers []ports.ThreadWriter, summarizer *handoff.Summarizer) Model {
 	providers := make([]onboardingProvider, 0)
@@ -265,90 +300,11 @@ func (m Model) backgroundLoadThreads() tea.Cmd {
 	}
 }
 
-func (m Model) refreshCurrentThread() tea.Cmd {
-	id := m.thread.ID
-	return func() tea.Msg {
-		thread, err := m.svc.GetThread(context.Background(), id)
-		if err != nil {
-			return nil
-		}
-		return threadRefreshedMsg{thread}
-	}
-}
-
 func (m Model) syncAll() tea.Cmd {
 	return func() tea.Msg {
 		results := m.svc.SyncAll(context.Background())
 		return syncDoneMsg{results}
 	}
-}
-
-func (m Model) openThread(t domain.Thread) tea.Cmd {
-	return func() tea.Msg {
-		full, err := m.svc.GetThread(context.Background(), t.ID)
-		if err != nil {
-			return errMsg{err}
-		}
-		return threadLoadedMsg{full}
-	}
-}
-
-// writeHandoff builds the copy for the chosen mode and writes it into the
-// target provider. m.thread itself is only read.
-func (m Model) writeHandoff(ctx context.Context, w ports.ThreadWriter, mode handoff.Mode) tea.Cmd {
-	t := m.thread
-	s := m.summarizer
-	return func() tea.Msg {
-		timeout := 30 * time.Second
-		if mode.NeedsLLM() {
-			timeout = 10 * time.Minute
-		}
-		ctx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		out, err := s.Prepare(ctx, t, mode)
-		if err != nil {
-			return handoffErrMsg{err}
-		}
-		if err := ctx.Err(); err != nil {
-			return handoffErrMsg{err}
-		}
-		id, err := w.WriteThread(ctx, out)
-		if err != nil {
-			return handoffErrMsg{err}
-		}
-		return handoffWrittenMsg{sessionID: id, writer: w}
-	}
-}
-
-func (m Model) recordHandoffLink(targetProvider, targetOriginalID string) tea.Cmd {
-	source := m.thread
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := m.svc.RecordHandoff(ctx, source, targetProvider, targetOriginalID); err != nil {
-			return handoffLinkErrMsg{err}
-		}
-		return nil
-	}
-}
-
-func (m Model) availableHandoffTargets() []ports.ThreadWriter {
-	inGroup := map[string]bool{}
-	for _, t := range m.groupThreads {
-		inGroup[t.Provider] = true
-	}
-	available := make([]ports.ThreadWriter, 0, len(m.writers))
-	for _, w := range m.writers {
-		if inGroup[w.Name()] {
-			continue
-		}
-		// Some providers can be read and resumed but not written to.
-		if ro, ok := w.(interface{ ReadOnly() bool }); ok && ro.ReadOnly() {
-			continue
-		}
-		available = append(available, w)
-	}
-	return available
 }
 
 func (m Model) archiveThreadCmd(t domain.Thread) tea.Cmd {
@@ -419,7 +375,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// A new viewport starts empty, so the open conversation is laid out
+		// again and the reader stays where it was.
+		offset := m.viewport.YOffset
 		m.viewport = viewport.New(msg.Width, msg.Height-4)
+		if len(m.groupThreads) > 0 {
+			m.viewport.SetContent(renderConversation(m.groupThreads))
+			m.viewport.SetYOffset(offset)
+		}
 
 	case countMsg:
 		if msg == 0 {
@@ -474,7 +437,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case stateList, stateSearch:
 			cmds = append(cmds, m.backgroundLoadThreads())
 		case stateThread:
-			cmds = append(cmds, m.refreshCurrentThread())
+			cmds = append(cmds, m.loadGroup(m.thread, m.groupThreads, false))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -482,29 +445,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.threads = []domain.Thread(msg)
 		m.groups = buildGroups(m.threads)
 		m.applyFilter()
+		// A handoff can add a session to the open conversation.
 		if m.state == stateThread {
 			for _, g := range m.groups {
-				if g.Primary.ID == m.thread.ID {
-					m.groupThreads = g.Members
-					break
+				if containsThread(g.Members, m.thread.ID) && !sameMembers(g.Members, m.groupThreads) {
+					return m, m.loadGroup(m.thread, g.Members, false)
 				}
 			}
 		}
 
-	case threadLoadedMsg:
-		m.thread = msg.thread
-		m.state = stateThread
-		m.viewport.SetContent(renderThread(msg.thread))
-		m.viewport.GotoBottom()
-
-	case threadRefreshedMsg:
-		if m.state == stateThread {
-			prevCount := len(m.thread.Messages)
-			m.thread = msg.thread
-			m.viewport.SetContent(renderThread(msg.thread))
-			if len(msg.thread.Messages) > prevCount {
-				m.viewport.GotoBottom()
-			}
+	case groupLoadedMsg:
+		if !msg.initial && (m.state != stateThread || !containsThread(msg.members, m.thread.ID)) {
+			return m, nil
+		}
+		prev := 0
+		for _, t := range m.groupThreads {
+			prev += len(t.Messages)
+		}
+		m.thread = msg.primary
+		m.groupThreads = msg.members
+		m.viewport.SetContent(renderConversation(msg.members))
+		now := 0
+		for _, t := range msg.members {
+			now += len(t.Messages)
+		}
+		if msg.initial {
+			m.state = stateThread
+			m.viewport.GotoBottom()
+		} else if now > prev {
+			m.viewport.GotoBottom()
 		}
 		return m, nil
 
@@ -519,14 +488,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handoffCancel = nil
 		m.handoffTarget = msg.writer
 		m.handoffSessionID = msg.sessionID
+		m.handoffWorkspace = msg.workspace
+		m.handoffAppended = msg.appended
+		m.handoffCount = msg.count
 		m.status = ""
 		m.state = stateHandoffConfirm
-		return m, m.recordHandoffLink(msg.writer.Name(), msg.sessionID)
+		if m.merging {
+			m.mergeSelected = nil
+		}
+		return m, m.recordHandoffLink(msg.source, msg.record)
 
 	case handoffErrMsg:
 		m.handoffCancel = nil
 		if errors.Is(msg.err, context.Canceled) {
 			// the user pressed Esc; the state was already reset
+			return m, nil
+		}
+		if m.merging {
+			// The selection is kept so the merge can be retried.
+			m.status = "merge error: " + msg.err.Error()
+			m.merging = false
+			m.state = stateList
 			return m, nil
 		}
 		m.status = "handoff error: " + msg.err.Error()
@@ -538,6 +520,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case managementDoneMsg:
 		m.state = stateList
 		return m, m.loadThreads()
+
+	case launchDoneMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("could not run %s: %v", msg.command, msg.err)
+		}
+		return m, nil
 
 	case errMsg:
 		m.status = "error: " + msg.err.Error()
@@ -563,17 +551,13 @@ func (m Model) syncSelected() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		results := m.svc.SyncAll(context.Background())
-		filtered := results[:0]
-		for _, r := range results {
-			for _, name := range selected {
-				if r.Provider == name {
-					filtered = append(filtered, r)
-					break
-				}
+		results := make([]syncsvc.SyncResult, 0, len(selected))
+		for _, name := range selected {
+			if r, ok := m.svc.SyncProvider(context.Background(), name); ok {
+				results = append(results, r)
 			}
 		}
-		return syncDoneMsg{filtered}
+		return syncDoneMsg{results}
 	}
 }
 
@@ -630,7 +614,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.filteredGroups) > 0 {
 				g := m.filteredGroups[m.cursor]
 				m.groupThreads = g.Members
-				return m, m.openThread(g.Primary)
+				return m, m.loadGroup(g.Primary, g.Members, true)
 			}
 		case "s":
 			m.status = "syncing..."
@@ -640,6 +624,26 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.setupHooksCmd()
 		case "L":
 			m.openLLMSetup()
+		case " ":
+			if len(m.filteredGroups) == 0 {
+				return m, nil
+			}
+			key := groupKey(m.filteredGroups[m.cursor])
+			if m.mergeSelected == nil {
+				m.mergeSelected = map[string]bool{}
+			}
+			if m.mergeSelected[key] {
+				delete(m.mergeSelected, key)
+			} else {
+				m.mergeSelected[key] = true
+			}
+			if m.cursor < len(m.filteredGroups)-1 {
+				m.cursor++
+			}
+		case "m":
+			return m, m.startMerge()
+		case "esc":
+			m.mergeSelected = nil
 		case "/":
 			m.state = stateSearch
 			m.query = ""
@@ -706,6 +710,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateList
 		case "r":
 			if len(m.groupThreads) <= 1 {
+				if m.thread.SourceMissing {
+					m.status = goneMessage(m.thread)
+					return m, nil
+				}
 				var w ports.ThreadWriter
 				for _, wr := range m.writers {
 					if wr.Name() == m.thread.Provider {
@@ -717,22 +725,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.status = "no writer for provider: " + m.thread.Provider
 					return m, nil
 				}
-				cmd := w.OpenCommand(m.thread.OriginalID, m.thread.WorkspacePath)
-				return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+				return m, launch(w.OpenCommand(m.thread.OriginalID, m.thread.WorkspacePath))
 			}
 			m.resumeCursor = 0
 			m.state = stateResumePicker
 		case "h":
-			if len(m.thread.Messages) == 0 {
-				m.status = "no messages to hand off"
+			m.handoffTargets = m.handoffTargetsFor()
+			first, ok := firstUsableTarget(m.handoffTargets)
+			if !ok {
+				m.status = "every tool is up to date with this conversation"
 				return m, nil
 			}
-			m.handoffTargets = m.availableHandoffTargets()
-			if len(m.handoffTargets) == 0 {
-				m.status = "thread already exists in all providers"
-				return m, nil
-			}
-			m.handoffCursor = 0
+			m.handoffCursor = first
 			m.state = stateHandoffPicker
 		default:
 			var cmd tea.Cmd
@@ -745,18 +749,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc", "q":
 			m.state = stateThread
 		case "up", "k":
-			if m.handoffCursor > 0 {
-				m.handoffCursor--
+			for i := m.handoffCursor - 1; i >= 0; i-- {
+				if m.handoffTargets[i].usable() {
+					m.handoffCursor = i
+					break
+				}
 			}
 		case "down", "j":
-			if m.handoffCursor < len(m.handoffTargets)-1 {
-				m.handoffCursor++
+			for i := m.handoffCursor + 1; i < len(m.handoffTargets); i++ {
+				if m.handoffTargets[i].usable() {
+					m.handoffCursor = i
+					break
+				}
 			}
 		case "enter":
-			if len(m.handoffTargets) == 0 {
+			if m.handoffCursor >= len(m.handoffTargets) || !m.handoffTargets[m.handoffCursor].usable() {
 				return m, nil
 			}
-			m.handoffTarget = m.handoffTargets[m.handoffCursor]
+			m.handoffChoice = m.handoffTargets[m.handoffCursor]
+			m.handoffTarget = m.handoffChoice.writer
+			// Sized now so the dialog can say whether the full transcript
+			// fits; composing a block needs no LLM.
+			m.handoffFullSize, m.handoffFullFits = handoff.FullSize(
+				handoffSource(m.thread, m.handoffChoice), m.handoffChoice.session != nil)
 			m.state = stateHandoffMode
 			// Re-check so an LLM server started (or configured) since launch
 			// is picked up.
@@ -767,6 +782,33 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case stateLLMSetup:
 		return m.handleLLMSetupKey(msg)
+
+	case stateMergePicker:
+		switch msg.String() {
+		case "esc", "q":
+			m.state = stateList
+		case "L":
+			m.openLLMSetup()
+		case "up", "k":
+			if m.handoffCursor > 0 {
+				m.handoffCursor--
+			}
+		case "down", "j":
+			if m.handoffCursor < len(m.targetWriters())-1 {
+				m.handoffCursor++
+			}
+		case "enter":
+			if m.llmChecking || !m.llmStatus.Ready() {
+				return m, nil
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			m.handoffCancel = cancel
+			m.handoffMode = handoff.ModeDetailed
+			m.merging = true
+			m.status = ""
+			m.state = stateHandoffWorking
+			return m, m.writeMerge(ctx, m.targetWriters()[m.handoffCursor], m.mergeGroups)
+		}
 
 	case stateHandoffMode:
 		switch msg.String() {
@@ -798,7 +840,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.handoffMode = mode
 			m.status = ""
 			m.state = stateHandoffWorking
-			return m, m.writeHandoff(ctx, m.handoffTarget, mode)
+			return m, m.writeHandoff(ctx, m.handoffChoice, mode)
 		}
 
 	case stateHandoffWorking:
@@ -809,21 +851,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.status = "handoff cancelled"
 			m.state = stateThread
+			if m.merging {
+				m.status = "merge cancelled"
+				m.merging = false
+				m.state = stateList
+			}
 		}
 
 	case stateHandoffConfirm:
+		back := stateThread
+		if m.merging {
+			back = stateList
+		}
 		switch msg.String() {
 		case "y", "Y":
-			m.state = stateThread
+			m.state = back
+			m.merging = false
 			m.status = ""
-			cmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.thread.WorkspacePath)
-			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-				return nil
-			})
+			return m, launch(m.handoffTarget.OpenCommand(m.handoffSessionID, m.handoffWorkspace))
 		case "n", "N", "esc":
-			openCmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.thread.WorkspacePath)
+			openCmd := m.handoffTarget.OpenCommand(m.handoffSessionID, m.handoffWorkspace)
 			m.status = "run: " + strings.Join(openCmd.Args, " ")
-			m.state = stateThread
+			m.state = back
+			m.merging = false
 		}
 
 	case stateDeletePicker:
@@ -946,6 +996,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			t := m.groupThreads[m.resumeCursor]
+			if t.SourceMissing {
+				m.status = goneMessage(t)
+				m.state = stateThread
+				return m, nil
+			}
 			var w ports.ThreadWriter
 			for _, wr := range m.writers {
 				if wr.Name() == t.Provider {
@@ -959,8 +1014,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.state = stateThread
-			cmd := w.OpenCommand(t.OriginalID, t.WorkspacePath)
-			return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+			return m, launch(w.OpenCommand(t.OriginalID, t.WorkspacePath))
 		}
 	}
 
@@ -1019,6 +1073,8 @@ func (m Model) View() string {
 		return m.viewDeleteConfirm()
 	case stateDeleteTyping:
 		return m.viewDeleteTyping()
+	case stateMergePicker:
+		return m.viewMergePicker()
 	default:
 		return m.viewList()
 	}
@@ -1084,22 +1140,22 @@ func (m Model) viewHookSetup() string {
 }
 
 func (m Model) viewHandoffPicker() string {
-	dialogWidth := 40
+	dialogWidth := 48
 
 	var inner strings.Builder
 	inner.WriteString("\n")
 	inner.WriteString("  Hand off to:\n")
 	inner.WriteString("\n")
-	for i, w := range m.handoffTargets {
-		label := providerLabels[w.Name()]
-		if label == "" {
-			label = w.Name()
+	for i, t := range m.handoffTargets {
+		text := fmt.Sprintf("%-12s %s", domain.ProviderLabel(t.writer.Name()), t.status())
+		switch {
+		case !t.usable():
+			inner.WriteString(styleHint.Render("  "+text) + "\n")
+		case i == m.handoffCursor:
+			inner.WriteString(styleCursor.Render("▶") + " " + text + "\n")
+		default:
+			inner.WriteString("  " + text + "\n")
 		}
-		line := fmt.Sprintf("  %s", label)
-		if i == m.handoffCursor {
-			line = styleCursor.Render("▶") + fmt.Sprintf(" %s", label)
-		}
-		inner.WriteString(line + "\n")
 	}
 	inner.WriteString("\n")
 	inner.WriteString(styleHint.Render("  ↑↓ navigate  Enter select  Esc back") + "\n")
@@ -1155,16 +1211,34 @@ func (m Model) viewHandoffMode() string {
 
 	var inner strings.Builder
 	inner.WriteString("\n")
-	inner.WriteString(fmt.Sprintf("  Hand off to %s as:\n", label))
+	if m.handoffChoice.session != nil {
+		inner.WriteString(fmt.Sprintf("  Catch %s up on %s as:\n", label, m.handoffChoice.status()))
+	} else {
+		inner.WriteString(fmt.Sprintf("  Hand off to %s as:\n", label))
+	}
 	inner.WriteString("\n")
 	for i, mode := range handoff.Modes {
+		size := ""
+		if mode == handoff.ModeFull && m.handoffFullSize > 0 {
+			size = styleHint.Render("  " + tokenEstimate(m.handoffFullSize))
+		}
 		switch {
 		case !m.modeUsable(mode):
-			inner.WriteString(styleHint.Render("  "+mode.Label()) + "\n")
+			inner.WriteString(styleHint.Render("  "+mode.Label()) + size + "\n")
 		case i == m.handoffModeCursor:
-			inner.WriteString(styleCursor.Render("▶") + " " + mode.Label() + "\n")
+			inner.WriteString(styleCursor.Render("▶") + " " + mode.Label() + size + "\n")
 		default:
-			inner.WriteString("  " + mode.Label() + "\n")
+			inner.WriteString("  " + mode.Label() + size + "\n")
+		}
+	}
+	if m.handoffFullSize > 0 && !m.handoffFullFits {
+		// Without an LLM, the lines below already say how to set one up.
+		warning := lipgloss.NewStyle().Width(dialogWidth - 4).Render(
+			fmt.Sprintf("The full transcript is %s, more than many models accept in one message. A summary is recommended.",
+				tokenEstimate(m.handoffFullSize)))
+		inner.WriteString("\n")
+		for _, line := range strings.Split(warning, "\n") {
+			inner.WriteString(styleWarn.Render("  "+line) + "\n")
 		}
 	}
 	inner.WriteString("\n")
@@ -1196,7 +1270,10 @@ func (m Model) viewHandoffWorking() string {
 	dialogWidth := 56
 
 	line := "  Writing session…"
-	if m.handoffMode.NeedsLLM() {
+	switch {
+	case m.merging:
+		line = fmt.Sprintf("  Summarizing %d threads with %s…", len(m.mergeGroups), m.llmStatus.Label)
+	case m.handoffMode.NeedsLLM():
 		line = "  Summarizing with " + m.llmStatus.Label + "…"
 	}
 
@@ -1231,6 +1308,9 @@ func (m Model) viewResumePicker() string {
 		if label == "" {
 			label = t.Provider
 		}
+		if t.SourceMissing {
+			label += styleHint.Render("  deleted")
+		}
 		line := fmt.Sprintf("  %s", label)
 		if i == m.resumeCursor {
 			line = styleCursor.Render("▶") + fmt.Sprintf(" %s", label)
@@ -1259,8 +1339,14 @@ func (m Model) viewHandoffConfirm() string {
 	}
 
 	var prompt string
-	if m.handoffTarget.Name() == m.thread.Provider {
-		prompt = fmt.Sprintf("  Resume existing session in %s?", label)
+	if m.merging {
+		prompt = fmt.Sprintf("  Merged %d threads into a new %s session.\n  Open it now?", m.handoffCount, label)
+	} else if m.handoffAppended {
+		noun := "messages"
+		if m.handoffCount == 1 {
+			noun = "message"
+		}
+		prompt = fmt.Sprintf("  Added %d %s to %s.\n  Resume it now?", m.handoffCount, noun, label)
 	} else {
 		prompt = fmt.Sprintf("  Open in %s?", label)
 	}
@@ -1389,7 +1475,7 @@ func (m Model) viewList() string {
 	if m.showArchived {
 		archivedHint = "[A]hide-archived"
 	}
-	hints := styleHint.Render("[s]sync [/]search [d]del [n]ren [a]arch " + archivedHint + " [L]llm [q]quit")
+	hints := styleHint.Render("[s]sync [/]search [m]merge [d]del [n]ren [a]arch " + archivedHint + " [L]llm [q]quit")
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(hints)
 	if gap < 1 {
 		gap = 1
@@ -1418,9 +1504,16 @@ func (m Model) viewList() string {
 	for i := start; i < len(m.filteredGroups) && i < start+listHeight; i++ {
 		g := m.filteredGroups[i]
 		cursor := "  "
+		picked := m.mergeSelected[groupKey(g)]
+		if picked {
+			cursor = styleCursor.Render(" ✓")
+		}
 		row := renderListRow(i+1, g, m.width)
 		if i == m.cursor {
 			cursor = styleCursor.Render("▶ ")
+			if picked {
+				cursor = styleCursor.Render("▶✓")
+			}
 			row = styleSelected.Width(m.width - 2).Render(row)
 		} else if g.Primary.Archived {
 			row = styleArchived.Render(row)
@@ -1440,7 +1533,11 @@ func (m Model) viewList() string {
 		statusLine = m.status
 	} else {
 		count := fmt.Sprintf("%d threads  ·  %s", len(m.filteredGroups), m.llmSummary())
-		nav := "↑↓ navigate  Enter open"
+		nav := "↑↓ navigate  Enter open  Space select"
+		if n := len(m.mergeSelected); n > 0 {
+			count = fmt.Sprintf("%d selected  ·  %s", n, m.llmSummary())
+			nav = "Space select  m merge  Esc clear"
+		}
 		statusGap := m.width - lipgloss.Width(count) - lipgloss.Width(nav) - 2
 		if statusGap < 1 {
 			statusGap = 1
@@ -1467,6 +1564,9 @@ func (m Model) viewThread() string {
 	}
 	hint := styleHint.Render("[r] resume  [h] handoff  [q] back")
 	ws := styleHint.Render(m.thread.WorkspacePath)
+	if gone := goneTools(m.groupThreads); gone != "" {
+		ws += styleHint.Render("  · deleted in " + gone + ", kept by threadman")
+	}
 	left := tag + " " + styleTitle.Render(title) + "  " + ws
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(hint)
 	if gap < 1 {
@@ -1500,33 +1600,39 @@ func renderListRow(n int, g ThreadGroup, width int) string {
 	if title == "" {
 		title = "(untitled)"
 	}
-	if len(title) > titleWidth {
-		title = title[:titleWidth-3] + "..."
-	}
-	ws := filepath.Base(g.Primary.WorkspacePath)
-	if len(ws) > 18 {
-		ws = ws[:15] + "..."
-	}
+	title = truncateRunes(title, titleWidth)
+	ws := truncateRunes(filepath.Base(g.Primary.WorkspacePath), 18)
 	date := lastMessageDate(g.Primary)
 	return fmt.Sprintf("%-3d  %s  %-*s  %-18s  %s", n, icons, titleWidth, title, ws, date)
 }
 
-func renderThread(t domain.Thread) string {
-	var b strings.Builder
-	sep := styleSep.Render(strings.Repeat("─", 80))
-	for _, m := range t.Messages {
-		switch m.Role {
-		case domain.RoleUser:
-			b.WriteString(styleYou.Render("You:") + "\n")
-		case domain.RoleAssistant:
-			b.WriteString(styleAssistant.Render("Assistant:") + "\n")
-		default:
-			b.WriteString(string(m.Role) + ":\n")
-		}
-		b.WriteString(m.Content + "\n")
-		b.WriteString(sep + "\n")
+// truncateRunes shortens s to at most n characters, ending it with "...".
+// Cutting by byte could split a multi-byte character.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
 	}
-	return b.String()
+	if n <= 3 {
+		return string(r[:n])
+	}
+	return string(r[:n-3]) + "..."
+}
+
+// launch runs a tool session in the terminal and reports if it can't start,
+// for example because the tool isn't installed or the workspace is gone.
+func launch(cmd *exec.Cmd) tea.Cmd {
+	name := strings.Join(cmd.Args, " ")
+	if cmd.Dir != "" {
+		if info, err := os.Stat(cmd.Dir); err != nil || !info.IsDir() {
+			return func() tea.Msg {
+				return launchDoneMsg{command: name, err: fmt.Errorf("workspace %s no longer exists", cmd.Dir)}
+			}
+		}
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return launchDoneMsg{command: name, err: err}
+	})
 }
 
 func lastMessageDate(t domain.Thread) string {

@@ -80,6 +80,21 @@ func Timestamp(v time.Time) predicate.Message {
 	return predicate.Message(sql.FieldEQ(FieldTimestamp, v))
 }
 
+// Kind applies equality check predicate on the "kind" field. It's identical to KindEQ.
+func Kind(v string) predicate.Message {
+	return predicate.Message(sql.FieldEQ(FieldKind, v))
+}
+
+// HandoffID applies equality check predicate on the "handoff_id" field. It's identical to HandoffIDEQ.
+func HandoffID(v string) predicate.Message {
+	return predicate.Message(sql.FieldEQ(FieldHandoffID, v))
+}
+
+// Tools applies equality check predicate on the "tools" field. It's identical to ToolsEQ.
+func Tools(v string) predicate.Message {
+	return predicate.Message(sql.FieldEQ(FieldTools, v))
+}
+
 // RoleEQ applies the EQ predicate on the "role" field.
 func RoleEQ(v string) predicate.Message {
 	return predicate.Message(sql.FieldEQ(FieldRole, v))
@@ -248,6 +263,201 @@ func TimestampLT(v time.Time) predicate.Message {
 // TimestampLTE applies the LTE predicate on the "timestamp" field.
 func TimestampLTE(v time.Time) predicate.Message {
 	return predicate.Message(sql.FieldLTE(FieldTimestamp, v))
+}
+
+// KindEQ applies the EQ predicate on the "kind" field.
+func KindEQ(v string) predicate.Message {
+	return predicate.Message(sql.FieldEQ(FieldKind, v))
+}
+
+// KindNEQ applies the NEQ predicate on the "kind" field.
+func KindNEQ(v string) predicate.Message {
+	return predicate.Message(sql.FieldNEQ(FieldKind, v))
+}
+
+// KindIn applies the In predicate on the "kind" field.
+func KindIn(vs ...string) predicate.Message {
+	return predicate.Message(sql.FieldIn(FieldKind, vs...))
+}
+
+// KindNotIn applies the NotIn predicate on the "kind" field.
+func KindNotIn(vs ...string) predicate.Message {
+	return predicate.Message(sql.FieldNotIn(FieldKind, vs...))
+}
+
+// KindGT applies the GT predicate on the "kind" field.
+func KindGT(v string) predicate.Message {
+	return predicate.Message(sql.FieldGT(FieldKind, v))
+}
+
+// KindGTE applies the GTE predicate on the "kind" field.
+func KindGTE(v string) predicate.Message {
+	return predicate.Message(sql.FieldGTE(FieldKind, v))
+}
+
+// KindLT applies the LT predicate on the "kind" field.
+func KindLT(v string) predicate.Message {
+	return predicate.Message(sql.FieldLT(FieldKind, v))
+}
+
+// KindLTE applies the LTE predicate on the "kind" field.
+func KindLTE(v string) predicate.Message {
+	return predicate.Message(sql.FieldLTE(FieldKind, v))
+}
+
+// KindContains applies the Contains predicate on the "kind" field.
+func KindContains(v string) predicate.Message {
+	return predicate.Message(sql.FieldContains(FieldKind, v))
+}
+
+// KindHasPrefix applies the HasPrefix predicate on the "kind" field.
+func KindHasPrefix(v string) predicate.Message {
+	return predicate.Message(sql.FieldHasPrefix(FieldKind, v))
+}
+
+// KindHasSuffix applies the HasSuffix predicate on the "kind" field.
+func KindHasSuffix(v string) predicate.Message {
+	return predicate.Message(sql.FieldHasSuffix(FieldKind, v))
+}
+
+// KindEqualFold applies the EqualFold predicate on the "kind" field.
+func KindEqualFold(v string) predicate.Message {
+	return predicate.Message(sql.FieldEqualFold(FieldKind, v))
+}
+
+// KindContainsFold applies the ContainsFold predicate on the "kind" field.
+func KindContainsFold(v string) predicate.Message {
+	return predicate.Message(sql.FieldContainsFold(FieldKind, v))
+}
+
+// HandoffIDEQ applies the EQ predicate on the "handoff_id" field.
+func HandoffIDEQ(v string) predicate.Message {
+	return predicate.Message(sql.FieldEQ(FieldHandoffID, v))
+}
+
+// HandoffIDNEQ applies the NEQ predicate on the "handoff_id" field.
+func HandoffIDNEQ(v string) predicate.Message {
+	return predicate.Message(sql.FieldNEQ(FieldHandoffID, v))
+}
+
+// HandoffIDIn applies the In predicate on the "handoff_id" field.
+func HandoffIDIn(vs ...string) predicate.Message {
+	return predicate.Message(sql.FieldIn(FieldHandoffID, vs...))
+}
+
+// HandoffIDNotIn applies the NotIn predicate on the "handoff_id" field.
+func HandoffIDNotIn(vs ...string) predicate.Message {
+	return predicate.Message(sql.FieldNotIn(FieldHandoffID, vs...))
+}
+
+// HandoffIDGT applies the GT predicate on the "handoff_id" field.
+func HandoffIDGT(v string) predicate.Message {
+	return predicate.Message(sql.FieldGT(FieldHandoffID, v))
+}
+
+// HandoffIDGTE applies the GTE predicate on the "handoff_id" field.
+func HandoffIDGTE(v string) predicate.Message {
+	return predicate.Message(sql.FieldGTE(FieldHandoffID, v))
+}
+
+// HandoffIDLT applies the LT predicate on the "handoff_id" field.
+func HandoffIDLT(v string) predicate.Message {
+	return predicate.Message(sql.FieldLT(FieldHandoffID, v))
+}
+
+// HandoffIDLTE applies the LTE predicate on the "handoff_id" field.
+func HandoffIDLTE(v string) predicate.Message {
+	return predicate.Message(sql.FieldLTE(FieldHandoffID, v))
+}
+
+// HandoffIDContains applies the Contains predicate on the "handoff_id" field.
+func HandoffIDContains(v string) predicate.Message {
+	return predicate.Message(sql.FieldContains(FieldHandoffID, v))
+}
+
+// HandoffIDHasPrefix applies the HasPrefix predicate on the "handoff_id" field.
+func HandoffIDHasPrefix(v string) predicate.Message {
+	return predicate.Message(sql.FieldHasPrefix(FieldHandoffID, v))
+}
+
+// HandoffIDHasSuffix applies the HasSuffix predicate on the "handoff_id" field.
+func HandoffIDHasSuffix(v string) predicate.Message {
+	return predicate.Message(sql.FieldHasSuffix(FieldHandoffID, v))
+}
+
+// HandoffIDEqualFold applies the EqualFold predicate on the "handoff_id" field.
+func HandoffIDEqualFold(v string) predicate.Message {
+	return predicate.Message(sql.FieldEqualFold(FieldHandoffID, v))
+}
+
+// HandoffIDContainsFold applies the ContainsFold predicate on the "handoff_id" field.
+func HandoffIDContainsFold(v string) predicate.Message {
+	return predicate.Message(sql.FieldContainsFold(FieldHandoffID, v))
+}
+
+// ToolsEQ applies the EQ predicate on the "tools" field.
+func ToolsEQ(v string) predicate.Message {
+	return predicate.Message(sql.FieldEQ(FieldTools, v))
+}
+
+// ToolsNEQ applies the NEQ predicate on the "tools" field.
+func ToolsNEQ(v string) predicate.Message {
+	return predicate.Message(sql.FieldNEQ(FieldTools, v))
+}
+
+// ToolsIn applies the In predicate on the "tools" field.
+func ToolsIn(vs ...string) predicate.Message {
+	return predicate.Message(sql.FieldIn(FieldTools, vs...))
+}
+
+// ToolsNotIn applies the NotIn predicate on the "tools" field.
+func ToolsNotIn(vs ...string) predicate.Message {
+	return predicate.Message(sql.FieldNotIn(FieldTools, vs...))
+}
+
+// ToolsGT applies the GT predicate on the "tools" field.
+func ToolsGT(v string) predicate.Message {
+	return predicate.Message(sql.FieldGT(FieldTools, v))
+}
+
+// ToolsGTE applies the GTE predicate on the "tools" field.
+func ToolsGTE(v string) predicate.Message {
+	return predicate.Message(sql.FieldGTE(FieldTools, v))
+}
+
+// ToolsLT applies the LT predicate on the "tools" field.
+func ToolsLT(v string) predicate.Message {
+	return predicate.Message(sql.FieldLT(FieldTools, v))
+}
+
+// ToolsLTE applies the LTE predicate on the "tools" field.
+func ToolsLTE(v string) predicate.Message {
+	return predicate.Message(sql.FieldLTE(FieldTools, v))
+}
+
+// ToolsContains applies the Contains predicate on the "tools" field.
+func ToolsContains(v string) predicate.Message {
+	return predicate.Message(sql.FieldContains(FieldTools, v))
+}
+
+// ToolsHasPrefix applies the HasPrefix predicate on the "tools" field.
+func ToolsHasPrefix(v string) predicate.Message {
+	return predicate.Message(sql.FieldHasPrefix(FieldTools, v))
+}
+
+// ToolsHasSuffix applies the HasSuffix predicate on the "tools" field.
+func ToolsHasSuffix(v string) predicate.Message {
+	return predicate.Message(sql.FieldHasSuffix(FieldTools, v))
+}
+
+// ToolsEqualFold applies the EqualFold predicate on the "tools" field.
+func ToolsEqualFold(v string) predicate.Message {
+	return predicate.Message(sql.FieldEqualFold(FieldTools, v))
+}
+
+// ToolsContainsFold applies the ContainsFold predicate on the "tools" field.
+func ToolsContainsFold(v string) predicate.Message {
+	return predicate.Message(sql.FieldContainsFold(FieldTools, v))
 }
 
 // HasThread applies the HasEdge predicate on the "thread" edge.

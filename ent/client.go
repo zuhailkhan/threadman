@@ -15,6 +15,7 @@ import (
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"github.com/zuhailkhan/threadman/ent/handoff"
 	"github.com/zuhailkhan/threadman/ent/message"
 	"github.com/zuhailkhan/threadman/ent/thread"
 )
@@ -24,6 +25,8 @@ type Client struct {
 	config
 	// Schema is the client for creating, migrating and dropping schema.
 	Schema *migrate.Schema
+	// Handoff is the client for interacting with the Handoff builders.
+	Handoff *HandoffClient
 	// Message is the client for interacting with the Message builders.
 	Message *MessageClient
 	// Thread is the client for interacting with the Thread builders.
@@ -39,6 +42,7 @@ func NewClient(opts ...Option) *Client {
 
 func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
+	c.Handoff = NewHandoffClient(c.config)
 	c.Message = NewMessageClient(c.config)
 	c.Thread = NewThreadClient(c.config)
 }
@@ -133,6 +137,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	return &Tx{
 		ctx:     ctx,
 		config:  cfg,
+		Handoff: NewHandoffClient(cfg),
 		Message: NewMessageClient(cfg),
 		Thread:  NewThreadClient(cfg),
 	}, nil
@@ -154,6 +159,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	return &Tx{
 		ctx:     ctx,
 		config:  cfg,
+		Handoff: NewHandoffClient(cfg),
 		Message: NewMessageClient(cfg),
 		Thread:  NewThreadClient(cfg),
 	}, nil
@@ -162,7 +168,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 // Debug returns a new debug-client. It's used to get verbose logging on specific operations.
 //
 //	client.Debug().
-//		Message.
+//		Handoff.
 //		Query().
 //		Count(ctx)
 func (c *Client) Debug() *Client {
@@ -184,6 +190,7 @@ func (c *Client) Close() error {
 // Use adds the mutation hooks to all the entity clients.
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
+	c.Handoff.Use(hooks...)
 	c.Message.Use(hooks...)
 	c.Thread.Use(hooks...)
 }
@@ -191,6 +198,7 @@ func (c *Client) Use(hooks ...Hook) {
 // Intercept adds the query interceptors to all the entity clients.
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
+	c.Handoff.Intercept(interceptors...)
 	c.Message.Intercept(interceptors...)
 	c.Thread.Intercept(interceptors...)
 }
@@ -198,12 +206,147 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 // Mutate implements the ent.Mutator interface.
 func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 	switch m := m.(type) {
+	case *HandoffMutation:
+		return c.Handoff.mutate(ctx, m)
 	case *MessageMutation:
 		return c.Message.mutate(ctx, m)
 	case *ThreadMutation:
 		return c.Thread.mutate(ctx, m)
 	default:
 		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
+	}
+}
+
+// HandoffClient is a client for the Handoff schema.
+type HandoffClient struct {
+	config
+}
+
+// NewHandoffClient returns a client for the Handoff from the given config.
+func NewHandoffClient(c config) *HandoffClient {
+	return &HandoffClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `handoff.Hooks(f(g(h())))`.
+func (c *HandoffClient) Use(hooks ...Hook) {
+	c.hooks.Handoff = append(c.hooks.Handoff, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `handoff.Intercept(f(g(h())))`.
+func (c *HandoffClient) Intercept(interceptors ...Interceptor) {
+	c.inters.Handoff = append(c.inters.Handoff, interceptors...)
+}
+
+// Create returns a builder for creating a Handoff entity.
+func (c *HandoffClient) Create() *HandoffCreate {
+	mutation := newHandoffMutation(c.config, OpCreate)
+	return &HandoffCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of Handoff entities.
+func (c *HandoffClient) CreateBulk(builders ...*HandoffCreate) *HandoffCreateBulk {
+	return &HandoffCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *HandoffClient) MapCreateBulk(slice any, setFunc func(*HandoffCreate, int)) *HandoffCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &HandoffCreateBulk{err: fmt.Errorf("calling to HandoffClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*HandoffCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &HandoffCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for Handoff.
+func (c *HandoffClient) Update() *HandoffUpdate {
+	mutation := newHandoffMutation(c.config, OpUpdate)
+	return &HandoffUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *HandoffClient) UpdateOne(_m *Handoff) *HandoffUpdateOne {
+	mutation := newHandoffMutation(c.config, OpUpdateOne, withHandoff(_m))
+	return &HandoffUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *HandoffClient) UpdateOneID(id string) *HandoffUpdateOne {
+	mutation := newHandoffMutation(c.config, OpUpdateOne, withHandoffID(id))
+	return &HandoffUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for Handoff.
+func (c *HandoffClient) Delete() *HandoffDelete {
+	mutation := newHandoffMutation(c.config, OpDelete)
+	return &HandoffDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *HandoffClient) DeleteOne(_m *Handoff) *HandoffDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *HandoffClient) DeleteOneID(id string) *HandoffDeleteOne {
+	builder := c.Delete().Where(handoff.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &HandoffDeleteOne{builder}
+}
+
+// Query returns a query builder for Handoff.
+func (c *HandoffClient) Query() *HandoffQuery {
+	return &HandoffQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeHandoff},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a Handoff entity by its id.
+func (c *HandoffClient) Get(ctx context.Context, id string) (*Handoff, error) {
+	return c.Query().Where(handoff.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *HandoffClient) GetX(ctx context.Context, id string) *Handoff {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *HandoffClient) Hooks() []Hook {
+	return c.hooks.Handoff
+}
+
+// Interceptors returns the client interceptors.
+func (c *HandoffClient) Interceptors() []Interceptor {
+	return c.inters.Handoff
+}
+
+func (c *HandoffClient) mutate(ctx context.Context, m *HandoffMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&HandoffCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&HandoffUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&HandoffUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&HandoffDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Handoff mutation op: %q", m.Op())
 	}
 }
 
@@ -508,9 +651,9 @@ func (c *ThreadClient) mutate(ctx context.Context, m *ThreadMutation) (Value, er
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		Message, Thread []ent.Hook
+		Handoff, Message, Thread []ent.Hook
 	}
 	inters struct {
-		Message, Thread []ent.Interceptor
+		Handoff, Message, Thread []ent.Interceptor
 	}
 )

@@ -25,6 +25,10 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 	return "", errReadOnly
 }
 
+func (w *Writer) AppendMessages(ctx context.Context, target domain.Thread, messages []domain.Message) error {
+	return errReadOnly
+}
+
 func (w *Writer) OpenCommand(sessionID string, workspacePath string) *exec.Cmd {
 	cmd := exec.Command("agy", "--conversation", sessionID)
 	cmd.Dir = workspacePath

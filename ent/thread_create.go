@@ -136,6 +136,20 @@ func (_c *ThreadCreate) SetNillableDeletedHash(v *string) *ThreadCreate {
 	return _c
 }
 
+// SetSourceMissing sets the "source_missing" field.
+func (_c *ThreadCreate) SetSourceMissing(v bool) *ThreadCreate {
+	_c.mutation.SetSourceMissing(v)
+	return _c
+}
+
+// SetNillableSourceMissing sets the "source_missing" field if the given value is not nil.
+func (_c *ThreadCreate) SetNillableSourceMissing(v *bool) *ThreadCreate {
+	if v != nil {
+		_c.SetSourceMissing(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *ThreadCreate) SetID(v string) *ThreadCreate {
 	_c.mutation.SetID(v)
@@ -212,6 +226,10 @@ func (_c *ThreadCreate) defaults() {
 		v := thread.DefaultDeletedHash
 		_c.mutation.SetDeletedHash(v)
 	}
+	if _, ok := _c.mutation.SourceMissing(); !ok {
+		v := thread.DefaultSourceMissing
+		_c.mutation.SetSourceMissing(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -251,6 +269,9 @@ func (_c *ThreadCreate) check() error {
 	}
 	if _, ok := _c.mutation.DeletedHash(); !ok {
 		return &ValidationError{Name: "deleted_hash", err: errors.New(`ent: missing required field "Thread.deleted_hash"`)}
+	}
+	if _, ok := _c.mutation.SourceMissing(); !ok {
+		return &ValidationError{Name: "source_missing", err: errors.New(`ent: missing required field "Thread.source_missing"`)}
 	}
 	return nil
 }
@@ -335,6 +356,10 @@ func (_c *ThreadCreate) createSpec() (*Thread, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DeletedHash(); ok {
 		_spec.SetField(thread.FieldDeletedHash, field.TypeString, value)
 		_node.DeletedHash = value
+	}
+	if value, ok := _c.mutation.SourceMissing(); ok {
+		_spec.SetField(thread.FieldSourceMissing, field.TypeBool, value)
+		_node.SourceMissing = value
 	}
 	if nodes := _c.mutation.MessagesIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -545,6 +570,18 @@ func (u *ThreadUpsert) SetDeletedHash(v string) *ThreadUpsert {
 // UpdateDeletedHash sets the "deleted_hash" field to the value that was provided on create.
 func (u *ThreadUpsert) UpdateDeletedHash() *ThreadUpsert {
 	u.SetExcluded(thread.FieldDeletedHash)
+	return u
+}
+
+// SetSourceMissing sets the "source_missing" field.
+func (u *ThreadUpsert) SetSourceMissing(v bool) *ThreadUpsert {
+	u.Set(thread.FieldSourceMissing, v)
+	return u
+}
+
+// UpdateSourceMissing sets the "source_missing" field to the value that was provided on create.
+func (u *ThreadUpsert) UpdateSourceMissing() *ThreadUpsert {
+	u.SetExcluded(thread.FieldSourceMissing)
 	return u
 }
 
@@ -761,6 +798,20 @@ func (u *ThreadUpsertOne) SetDeletedHash(v string) *ThreadUpsertOne {
 func (u *ThreadUpsertOne) UpdateDeletedHash() *ThreadUpsertOne {
 	return u.Update(func(s *ThreadUpsert) {
 		s.UpdateDeletedHash()
+	})
+}
+
+// SetSourceMissing sets the "source_missing" field.
+func (u *ThreadUpsertOne) SetSourceMissing(v bool) *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetSourceMissing(v)
+	})
+}
+
+// UpdateSourceMissing sets the "source_missing" field to the value that was provided on create.
+func (u *ThreadUpsertOne) UpdateSourceMissing() *ThreadUpsertOne {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateSourceMissing()
 	})
 }
 
@@ -1144,6 +1195,20 @@ func (u *ThreadUpsertBulk) SetDeletedHash(v string) *ThreadUpsertBulk {
 func (u *ThreadUpsertBulk) UpdateDeletedHash() *ThreadUpsertBulk {
 	return u.Update(func(s *ThreadUpsert) {
 		s.UpdateDeletedHash()
+	})
+}
+
+// SetSourceMissing sets the "source_missing" field.
+func (u *ThreadUpsertBulk) SetSourceMissing(v bool) *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.SetSourceMissing(v)
+	})
+}
+
+// UpdateSourceMissing sets the "source_missing" field to the value that was provided on create.
+func (u *ThreadUpsertBulk) UpdateSourceMissing() *ThreadUpsertBulk {
+	return u.Update(func(s *ThreadUpsert) {
+		s.UpdateSourceMissing()
 	})
 }
 

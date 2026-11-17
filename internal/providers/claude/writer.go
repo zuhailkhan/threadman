@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -74,10 +75,17 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 		return "", err
 	}
 
-	// Claude Code rebuilds a conversation by walking parentUuid links, so each
-	// entry has to point at the one before it.
-	var parentUUID any
-	for _, msg := range thread.Messages {
+	if _, err := writeEntries(enc, thread.Messages, sessionID, thread.WorkspacePath, nil); err != nil {
+		return "", err
+	}
+	return sessionID, nil
+}
+
+// writeEntries encodes messages as session entries chained from parent.
+// Claude Code rebuilds a conversation by walking parentUuid links, so each
+// entry has to point at the one before it. It returns the last entry's uuid.
+func writeEntries(enc *json.Encoder, messages []domain.Message, sessionID, cwd string, parent any) (any, error) {
+	for _, msg := range messages {
 		ts := msg.Timestamp
 		if ts.IsZero() {
 			ts = time.Now()
@@ -86,12 +94,12 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 
 		entry := map[string]any{
 			"uuid":        id,
-			"parentUuid":  parentUUID,
+			"parentUuid":  parent,
 			"isSidechain": false,
 			"userType":    "external",
 			"entrypoint":  "cli",
 			"sessionId":   sessionID,
-			"cwd":         thread.WorkspacePath,
+			"cwd":         cwd,
 			"timestamp":   ts.Format(time.RFC3339),
 		}
 
@@ -122,12 +130,79 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 		}
 
 		if err := enc.Encode(entry); err != nil {
-			return "", err
+			return nil, err
 		}
-		parentUUID = id
+		parent = id
+	}
+	return parent, nil
+}
+
+// AppendMessages adds messages to the end of an existing session, chained
+// from its last entry, so `claude --resume` continues the same session with
+// them in its history.
+func (w *Writer) AppendMessages(ctx context.Context, target domain.Thread, messages []domain.Message) error {
+	path := target.SourceFilePath
+	if path == "" {
+		return fmt.Errorf("claude session %s has no session file", target.OriginalID)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read session file: %w", err)
 	}
 
-	return sessionID, nil
+	leaf, cwd, sessionID := lastEntry(data)
+	if leaf == "" {
+		return fmt.Errorf("claude session %s has no entries to continue from", target.OriginalID)
+	}
+	if sessionID == "" {
+		sessionID = target.OriginalID
+	}
+	if target.WorkspacePath != "" {
+		cwd = target.WorkspacePath
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return fmt.Errorf("open session file: %w", err)
+	}
+	defer f.Close()
+
+	// An interrupted write can leave the last line without its newline.
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		if _, err := f.Write([]byte{'\n'}); err != nil {
+			return err
+		}
+	}
+	if _, err := writeEntries(json.NewEncoder(f), messages, sessionID, cwd, leaf); err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+// lastEntry finds the entry new messages must chain from: the last one on the
+// main conversation with a uuid. Bookkeeping lines such as session-owner and
+// last-prompt carry no uuid, and subagent sidechains aren't part of the main
+// conversation.
+func lastEntry(data []byte) (leaf, cwd, sessionID string) {
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		var e struct {
+			UUID        string `json:"uuid"`
+			IsSidechain bool   `json:"isSidechain"`
+			CWD         string `json:"cwd"`
+			SessionID   string `json:"sessionId"`
+		}
+		if json.Unmarshal(bytes.TrimSpace(line), &e) != nil || e.UUID == "" || e.IsSidechain {
+			continue
+		}
+		leaf = e.UUID
+		if e.CWD != "" {
+			cwd = e.CWD
+		}
+		if e.SessionID != "" {
+			sessionID = e.SessionID
+		}
+	}
+	return leaf, cwd, sessionID
 }
 
 func (w *Writer) OpenCommand(sessionID string, workspacePath string) *exec.Cmd {

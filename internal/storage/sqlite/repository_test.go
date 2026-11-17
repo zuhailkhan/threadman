@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,7 +76,7 @@ func TestRecordHandoff_SetsCanonicalOnSource(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	if err := repo.RecordHandoff(ctx, source, "gemini", "xyz"); err != nil {
+	if err := repo.RecordHandoff(ctx, source, testHandoff(source, "gemini", "xyz")); err != nil {
 		t.Fatalf("RecordHandoff: %v", err)
 	}
 
@@ -109,7 +111,7 @@ func TestRecordHandoff_ChainInheritsRootCanonicalID(t *testing.T) {
 	if err := repo.UpsertThread(ctx, source); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := repo.RecordHandoff(ctx, source, "gemini", "xyz"); err != nil {
+	if err := repo.RecordHandoff(ctx, source, testHandoff(source, "gemini", "xyz")); err != nil {
 		t.Fatalf("first handoff: %v", err)
 	}
 
@@ -120,7 +122,7 @@ func TestRecordHandoff_ChainInheritsRootCanonicalID(t *testing.T) {
 	}
 	geminiStub := byProvider["gemini"]
 
-	if err := repo.RecordHandoff(ctx, geminiStub, "opencode", "ses_abc123"); err != nil {
+	if err := repo.RecordHandoff(ctx, geminiStub, testHandoff(geminiStub, "opencode", "ses_abc123")); err != nil {
 		t.Fatalf("second handoff: %v", err)
 	}
 
@@ -264,7 +266,7 @@ func TestArchiveThreadGroup_AppliesToAllGroupMembers(t *testing.T) {
 	if err := repo.UpsertThread(ctx, source); err != nil {
 		t.Fatalf("upsert source: %v", err)
 	}
-	if err := repo.RecordHandoff(ctx, source, "gemini", "xyz"); err != nil {
+	if err := repo.RecordHandoff(ctx, source, testHandoff(source, "gemini", "xyz")); err != nil {
 		t.Fatalf("handoff: %v", err)
 	}
 
@@ -372,7 +374,7 @@ func TestUpsertThread_PreservesArchivedAndCustomTitle(t *testing.T) {
 	}
 }
 
-func TestDeleteThreadsNotIn_PreservesTombstones(t *testing.T) {
+func TestMarkMissingNotIn_LeavesTombstones(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -389,8 +391,11 @@ func TestDeleteThreadsNotIn_PreservesTombstones(t *testing.T) {
 		t.Fatalf("MarkThreadDeleted: %v", err)
 	}
 
-	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{}); err != nil {
-		t.Fatalf("DeleteThreadsNotIn: %v", err)
+	if err := repo.MarkMissingNotIn(ctx, "claude", []string{}); err != nil {
+		t.Fatalf("MarkMissingNotIn: %v", err)
+	}
+	if e, err := repo.client.Thread.Get(ctx, th.ID); err != nil || e.SourceMissing || !e.Deleted {
+		t.Fatalf("tombstone after marking: %+v, %v", e, err)
 	}
 
 	if err := repo.UpsertThread(ctx, th); err != nil {
@@ -423,7 +428,22 @@ func countMessages(t *testing.T, repo *Repository) int {
 	return n
 }
 
-func TestDeleteThreadsNotIn_RemovesMessagesOfPrunedThreads(t *testing.T) {
+func threadsByID(t *testing.T, repo *Repository, provider string) map[string]domain.Thread {
+	t.Helper()
+	threads, err := repo.ListThreads(context.Background(), provider, true)
+	if err != nil {
+		t.Fatalf("ListThreads: %v", err)
+	}
+	out := map[string]domain.Thread{}
+	for _, th := range threads {
+		out[th.ID] = th
+	}
+	return out
+}
+
+// A session its tool removed stays in threadman, with everything the user
+// set on it, flagged as missing.
+func TestMarkMissingNotIn_KeepsThreadAndMessages(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -432,17 +452,46 @@ func TestDeleteThreadsNotIn_RemovesMessagesOfPrunedThreads(t *testing.T) {
 			t.Fatalf("upsert %s: %v", id, err)
 		}
 	}
-
-	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
-		t.Fatalf("DeleteThreadsNotIn: %v", err)
+	if err := repo.RenameThreadGroup(ctx, "claude-gone", "My title"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ArchiveThreadGroup(ctx, "claude-gone"); err != nil {
+		t.Fatal(err)
 	}
 
-	if got := countMessages(t, repo); got != 2 {
-		t.Errorf("messages left: got %d, want the 2 of the kept thread", got)
+	if err := repo.MarkMissingNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
+		t.Fatalf("MarkMissingNotIn: %v", err)
+	}
+
+	got := threadsByID(t, repo, "claude")
+	gone, kept := got["claude-gone"], got["claude-kept"]
+	if !gone.SourceMissing || kept.SourceMissing {
+		t.Errorf("SourceMissing: gone %v, kept %v", gone.SourceMissing, kept.SourceMissing)
+	}
+	if len(gone.Messages) != 2 || gone.CustomTitle != "My title" || !gone.Archived {
+		t.Errorf("missing thread lost data: %+v", gone)
+	}
+	if n := countMessages(t, repo); n != 4 {
+		t.Errorf("messages: got %d, want all 4", n)
 	}
 }
 
-func TestUpsertThread_ReimportsPrunedThread(t *testing.T) {
+func TestMarkMissingNotIn_OnlyThatProvider(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	if err := repo.UpsertThread(ctx, threadWithMessages("pi-1", "pi", "1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkMissingNotIn(ctx, "claude", []string{"claude-x"}); err != nil {
+		t.Fatal(err)
+	}
+	if th := threadsByID(t, repo, "pi")["pi-1"]; th.SourceMissing {
+		t.Error("another provider's thread was flagged")
+	}
+}
+
+// A session that reappears, for example restored from a backup, is live again.
+func TestUpsertThread_ClearsMissingFlag(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -450,32 +499,20 @@ func TestUpsertThread_ReimportsPrunedThread(t *testing.T) {
 	if err := repo.UpsertThread(ctx, gone); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := repo.UpsertThread(ctx, threadWithMessages("claude-kept", "claude", "kept")); err != nil {
-		t.Fatalf("upsert: %v", err)
+	if err := repo.MarkMissingNotIn(ctx, "claude", []string{"claude-other"}); err != nil {
+		t.Fatalf("MarkMissingNotIn: %v", err)
 	}
-	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
-		t.Fatalf("DeleteThreadsNotIn: %v", err)
-	}
-
 	if err := repo.UpsertThread(ctx, gone); err != nil {
-		t.Fatalf("re-upsert of pruned thread: %v", err)
+		t.Fatalf("re-upsert: %v", err)
 	}
-	threads, err := repo.ListThreads(ctx, "claude", false)
-	if err != nil {
-		t.Fatalf("ListThreads: %v", err)
-	}
-	if len(threads) != 2 {
-		t.Fatalf("expected 2 threads, got %d", len(threads))
-	}
-	for _, th := range threads {
-		if len(th.Messages) != 2 {
-			t.Errorf("%s: got %d messages, want 2", th.ID, len(th.Messages))
-		}
+	th := threadsByID(t, repo, "claude")["claude-gone"]
+	if th.SourceMissing || len(th.Messages) != 2 {
+		t.Errorf("after the session came back: missing %v, %d messages", th.SourceMissing, len(th.Messages))
 	}
 }
 
-// Databases written by earlier versions hold messages whose thread was pruned
-// without them. Deleting the thread row directly reproduces that state.
+// Databases written by versions that pruned threads hold messages whose
+// thread was deleted without them. Deleting the thread row directly reproduces that state.
 func orphanMessages(t *testing.T, repo *Repository, th domain.Thread) {
 	t.Helper()
 	ctx := context.Background()
@@ -512,7 +549,7 @@ func TestUpsertThread_ReplacesOrphanedMessages(t *testing.T) {
 	}
 }
 
-func TestDeleteThreadsNotIn_SweepsOrphanedMessages(t *testing.T) {
+func TestMarkMissingNotIn_SweepsOrphanedMessages(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 
@@ -521,11 +558,309 @@ func TestDeleteThreadsNotIn_SweepsOrphanedMessages(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	if err := repo.DeleteThreadsNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
-		t.Fatalf("DeleteThreadsNotIn: %v", err)
+	if err := repo.MarkMissingNotIn(ctx, "claude", []string{"claude-kept"}); err != nil {
+		t.Fatalf("MarkMissingNotIn: %v", err)
 	}
 
 	if got := countMessages(t, repo); got != 2 {
 		t.Errorf("messages left: got %d, want the 2 of the kept thread", got)
+	}
+}
+
+func testHandoff(source domain.Thread, provider, originalID string) domain.Handoff {
+	return domain.Handoff{
+		ID:                 source.ID + "->" + provider + "-" + originalID,
+		SourceThreadID:     source.ID,
+		TargetProvider:     provider,
+		TargetOriginalID:   originalID,
+		Mode:               "full",
+		SourceMessageCount: len(source.Messages),
+		Content:            "[threadman handoff x]\nbody",
+	}
+}
+
+func TestRecordHandoff_StoresRecord(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	source := threadWithMessages("claude-abc", "claude", "abc")
+	if err := repo.UpsertThread(ctx, source); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	h := domain.Handoff{
+		ID:                  "h-1",
+		TargetProvider:      "pi",
+		TargetOriginalID:    "sess-1",
+		Mode:                "detailed",
+		Summarizer:          "Ollama · llama3.2",
+		SourceMessageCount:  2,
+		SourceLastMessageID: "claude-abc:m2",
+		Content:             "[threadman handoff h-1 · from Claude Code]\nbrief",
+		CreatedAt:           time.Unix(5000, 0),
+	}
+	if err := repo.RecordHandoff(ctx, source, h); err != nil {
+		t.Fatalf("RecordHandoff: %v", err)
+	}
+
+	got, err := repo.GetHandoff(ctx, "h-1")
+	if err != nil {
+		t.Fatalf("GetHandoff: %v", err)
+	}
+	want := h
+	want.SourceThreadID = "claude-abc"
+	if !got.CreatedAt.Equal(want.CreatedAt) {
+		t.Errorf("CreatedAt: got %v, want %v", got.CreatedAt, want.CreatedAt)
+	}
+	got.CreatedAt = want.CreatedAt
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("record:\n got %+v\nwant %+v", got, want)
+	}
+	if got.TargetThreadID() != "pi-sess-1" {
+		t.Errorf("TargetThreadID: got %q", got.TargetThreadID())
+	}
+}
+
+func TestRecordHandoff_RejectsIncompleteRecord(t *testing.T) {
+	repo := setupTestRepo(t)
+	source := baseThread("claude-abc", "claude", "abc")
+	if err := repo.RecordHandoff(context.Background(), source, domain.Handoff{ID: "h-1", TargetProvider: "pi"}); err == nil {
+		t.Error("a record without a target session should be rejected")
+	}
+}
+
+// A live hook can ingest the target session before the handoff is recorded.
+func TestRecordHandoff_KeepsMessagesOfAlreadySyncedTarget(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	source := threadWithMessages("claude-abc", "claude", "abc")
+	target := threadWithMessages("pi-sess-1", "pi", "sess-1")
+	for _, th := range []domain.Thread{source, target} {
+		if err := repo.UpsertThread(ctx, th); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	if err := repo.RecordHandoff(ctx, source, testHandoff(source, "pi", "sess-1")); err != nil {
+		t.Fatalf("RecordHandoff: %v", err)
+	}
+
+	threads, err := repo.ListThreads(ctx, "pi", false)
+	if err != nil {
+		t.Fatalf("ListThreads: %v", err)
+	}
+	if len(threads) != 1 || len(threads[0].Messages) != 2 {
+		t.Fatalf("target lost its messages: %+v", threads)
+	}
+	if threads[0].CanonicalID != "claude-abc" {
+		t.Errorf("target not linked: canonical_id %q", threads[0].CanonicalID)
+	}
+}
+
+// A merged session is a conversation of its own: the threads it came from
+// ran separately, so none of them is linked to it or to each other.
+func TestRecordHandoff_MergeKeepsTargetSeparate(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	older := threadWithMessages("claude-a", "claude", "a")
+	newer := threadWithMessages("opencode-b", "opencode", "b")
+	newer.Title = "fix the parser"
+	newer.WorkspacePath = "/proj"
+	for _, th := range []domain.Thread{older, newer} {
+		if err := repo.UpsertThread(ctx, th); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+	h := testHandoff(newer, "pi", "merged-1")
+	h.Mode = "merge"
+	h.MergedFrom = []string{"claude-a", "opencode-b"}
+	if err := repo.RecordHandoff(ctx, newer, h); err != nil {
+		t.Fatalf("RecordHandoff: %v", err)
+	}
+
+	got, err := repo.GetHandoff(ctx, h.ID)
+	if err != nil {
+		t.Fatalf("GetHandoff: %v", err)
+	}
+	if !reflect.DeepEqual(got.MergedFrom, h.MergedFrom) {
+		t.Errorf("MergedFrom: got %v, want %v", got.MergedFrom, h.MergedFrom)
+	}
+
+	threads, err := repo.ListThreads(ctx, "", false)
+	if err != nil {
+		t.Fatalf("ListThreads: %v", err)
+	}
+	for _, th := range threads {
+		if th.CanonicalID != "" && th.CanonicalID != th.ID {
+			t.Errorf("%s linked into %q; a merge links nothing", th.ID, th.CanonicalID)
+		}
+		if th.ID == "pi-merged-1" {
+			if th.Title != "fix the parser (merged from 2)" || th.WorkspacePath != "/proj" {
+				t.Errorf("merged stub: title %q, workspace %q", th.Title, th.WorkspacePath)
+			}
+		}
+	}
+}
+
+func TestUpsertThread_StoresMessageKind(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	th := baseThread("pi-sess-1", "pi", "sess-1")
+	th.Messages = []domain.Message{
+		{ID: "b", Role: domain.RoleUser, Content: "[threadman handoff h-1]\nblock", Kind: domain.KindHandoff, HandoffID: "h-1", Timestamp: time.Unix(1000, 0)},
+		{ID: "u", Role: domain.RoleUser, Content: "next", Timestamp: time.Unix(1001, 0)},
+	}
+	if err := repo.UpsertThread(ctx, th); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	threads, err := repo.ListThreads(ctx, "pi", false)
+	if err != nil {
+		t.Fatalf("ListThreads: %v", err)
+	}
+	byContent := map[string]domain.Message{}
+	for _, m := range threads[0].Messages {
+		byContent[m.Content] = m
+	}
+	if m := byContent["[threadman handoff h-1]\nblock"]; m.Kind != domain.KindHandoff || m.HandoffID != "h-1" {
+		t.Errorf("handoff block: kind %q, handoff_id %q", m.Kind, m.HandoffID)
+	}
+	if m := byContent["next"]; m.Kind != domain.KindMessage || m.HandoffID != "" {
+		t.Errorf("ordinary message: kind %q, handoff_id %q", m.Kind, m.HandoffID)
+	}
+}
+
+func TestSearchMessages_SkipsHandoffBlocks(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	source := baseThread("claude-abc", "claude", "abc")
+	source.Messages = []domain.Message{{ID: "m1", Role: domain.RoleUser, Content: "fix the zebra parser", Timestamp: time.Unix(1000, 0)}}
+	target := baseThread("pi-sess-1", "pi", "sess-1")
+	target.Messages = []domain.Message{{ID: "b", Role: domain.RoleUser, Content: "[threadman handoff h-1]\nUser: fix the zebra parser", Kind: domain.KindHandoff, HandoffID: "h-1", Timestamp: time.Unix(1001, 0)}}
+	for _, th := range []domain.Thread{source, target} {
+		if err := repo.UpsertThread(ctx, th); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	threads, err := repo.SearchMessages(ctx, "zebra")
+	if err != nil {
+		t.Fatalf("SearchMessages: %v", err)
+	}
+	if len(threads) != 1 || threads[0].ID != "claude-abc" {
+		ids := []string{}
+		for _, th := range threads {
+			ids = append(ids, th.ID)
+		}
+		t.Errorf("got %v, want only the source thread", ids)
+	}
+}
+
+func TestUpsertThread_EmptyTitleKeepsStoredTitle(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	th := baseThread("pi-sess-1", "pi", "sess-1")
+	th.Title = "Fix the parser"
+	if err := repo.UpsertThread(ctx, th); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	th.Title = ""
+	if err := repo.UpsertThread(ctx, th); err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+
+	threads, err := repo.ListThreads(ctx, "pi", false)
+	if err != nil {
+		t.Fatalf("ListThreads: %v", err)
+	}
+	if threads[0].Title != "Fix the parser" {
+		t.Errorf("title: got %q, want the stored one", threads[0].Title)
+	}
+}
+
+func TestListThreads_NewestActivityFirst(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	// Created first but talked in most recently.
+	old := baseThread("claude-old", "claude", "old")
+	old.CreatedAt = time.Unix(1000, 0)
+	old.Messages = []domain.Message{{ID: "m", Role: domain.RoleUser, Content: "recent", Timestamp: time.Unix(9000, 0)}}
+	quiet := baseThread("claude-quiet", "claude", "quiet")
+	quiet.CreatedAt = time.Unix(5000, 0)
+	quiet.Messages = []domain.Message{{ID: "m", Role: domain.RoleUser, Content: "older", Timestamp: time.Unix(5000, 0)}}
+	empty := baseThread("claude-empty", "claude", "empty")
+	empty.CreatedAt = time.Unix(7000, 0)
+	for _, th := range []domain.Thread{quiet, old, empty} {
+		if err := repo.UpsertThread(ctx, th); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	threads, err := repo.ListThreads(ctx, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, th := range threads {
+		got = append(got, th.ID)
+	}
+	if want := []string{"claude-old", "claude-empty", "claude-quiet"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("order %v, want %v", got, want)
+	}
+}
+
+func TestSearchMessages_SkipsDeletedThreads(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	th := baseThread("claude-abc", "claude", "abc")
+	th.Messages = []domain.Message{{ID: "m1", Role: domain.RoleUser, Content: "fix the zebra parser", Timestamp: time.Unix(1000, 0)}}
+	if err := repo.UpsertThread(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkThreadDeleted(ctx, th.ID, computeDeleteHash(th)); err != nil {
+		t.Fatal(err)
+	}
+
+	threads, err := repo.SearchMessages(ctx, "zebra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(threads) != 0 {
+		t.Errorf("search found a deleted thread: %+v", threads)
+	}
+}
+
+func TestUpsertThread_StoresToolCalls(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	th := baseThread("claude-abc", "claude", "abc")
+	tools := []domain.ToolCall{{Name: "Bash", Input: "go test ./...", Output: "ok", Error: false}, {Name: "Read", Input: "a.go", Error: true}}
+	th.Messages = []domain.Message{
+		{ID: "a1", Role: domain.RoleAssistant, Content: "", Tools: tools, Timestamp: time.Unix(1000, 0)},
+		{ID: "u1", Role: domain.RoleUser, Content: "thanks", Timestamp: time.Unix(1001, 0)},
+	}
+	if err := repo.UpsertThread(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+
+	got := threadsByID(t, repo, "claude")["claude-abc"]
+	for _, m := range got.Messages {
+		switch m.Content {
+		case "":
+			if len(m.Tools) != 2 || m.Tools[0] != tools[0] || m.Tools[1] != tools[1] {
+				t.Errorf("tools = %+v", m.Tools)
+			}
+		case "thanks":
+			if m.Tools != nil {
+				t.Errorf("a message without tools got %+v", m.Tools)
+			}
+		}
 	}
 }
