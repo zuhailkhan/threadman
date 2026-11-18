@@ -19,8 +19,7 @@ That database is a durable copy. When a tool deletes a session, for example when
 - **CLI subcommands** — `sync`, `list`, `search`, `show` for scripting
 
 
-<img width="1920" height="1045" alt="image" src="https://github.com/user-attachments/assets/94d4fbc4-be9c-40f6-bb5a-56d487347d17" />
-
+<img width="1177" height="785" alt="image" src="https://github.com/user-attachments/assets/12e5b02a-e2af-4103-9d2e-1a67faba489e" />
 
 ## Supported Providers
 
