@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/zuhailkhan/threadman/internal/conversation"
 	"github.com/zuhailkhan/threadman/internal/domain"
 )
@@ -72,11 +73,12 @@ func layoutConversation(threads []domain.Thread, width int) (string, []promptMar
 			lines = append(lines, handoffDivider(e.Provider, msg, width), "")
 			continue
 		}
+		content := cleanText(msg.Content)
 		bar, label := styleAI, "Assistant"
 		switch msg.Role {
 		case domain.RoleUser:
 			bar, label = styleYou, "You"
-			prompts = append(prompts, promptMark{line: len(lines), text: firstLine(msg.Content)})
+			prompts = append(prompts, promptMark{line: len(lines), text: firstLine(content)})
 		case domain.RoleAssistant:
 		default:
 			bar, label = styleHint, string(msg.Role)
@@ -90,11 +92,18 @@ func layoutConversation(threads []domain.Thread, width int) (string, []promptMar
 			head.add(styleFaint, "  ·  "+messageTime(msg.Timestamp, now))
 		}
 		lines = append(lines, head.String())
-		lines = append(lines, contentLines(msg.Content, textW)...)
+		lines = append(lines, contentLines(content, textW)...)
 		for _, call := range msg.Tools {
 			lines = append(lines, styleFaint.Render("▎ ")+toolLine(call))
 		}
 		lines = append(lines, "")
+	}
+	// A line wider than the reader would wrap in the terminal and push every
+	// line below it down.
+	for i, l := range lines {
+		if lipgloss.Width(l) > width {
+			lines[i] = ansi.Truncate(l, width, "…")
+		}
 	}
 	return strings.Join(lines, "\n"), prompts
 }
@@ -108,7 +117,7 @@ func messageTime(t, now time.Time) string {
 }
 
 func firstLine(s string) string {
-	for _, l := range strings.Split(s, "\n") {
+	for _, l := range strings.Split(cleanText(s), "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			return l
 		}
@@ -160,8 +169,8 @@ func inlineCode(s string) string {
 // toolLine is a one-line summary of a tool call for the reader: the tool and
 // the first line of its input. threadman show prints calls in full.
 func toolLine(call domain.ToolCall) string {
-	input, _, _ := strings.Cut(call.Input, "\n")
-	text := "▸ " + call.Name
+	input := firstLine(call.Input)
+	text := "▸ " + oneLine(call.Name)
 	if input != "" {
 		text += "  " + truncateRunes(input, 100)
 	}
@@ -177,7 +186,7 @@ func toolLine(call domain.ToolCall) string {
 func handoffDivider(provider string, m domain.Message, width int) string {
 	label := "handed off to " + domain.ProviderLabel(provider)
 	if _, detail, ok := domain.ParseHandoffMarker(m.Content); ok && detail != "" {
-		label += " · " + detail
+		label += " · " + oneLine(detail)
 	}
 	label = fit(label, width-8)
 	rest := max(0, width-lipgloss.Width(label)-6)

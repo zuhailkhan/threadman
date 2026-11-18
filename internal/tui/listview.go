@@ -17,16 +17,19 @@ import (
 const previewMinWidth = 100
 
 func displayTitle(t domain.Thread) string {
+	var title string
 	switch {
 	case t.CustomTitle != "":
-		return t.CustomTitle
+		title = oneLine(t.CustomTitle)
 	case domain.IsHandoffMarker(t.Title):
-		return handoffTitle(t)
-	case t.Title != "":
-		return t.Title
+		title = oneLine(handoffTitle(t))
 	default:
+		title = oneLine(t.Title)
+	}
+	if title == "" {
 		return "(untitled)"
 	}
+	return title
 }
 
 // handoffTitle names a session that a handoff created, whose own title is
@@ -273,7 +276,7 @@ func matchSnippet(g ThreadGroup, q string, width int) string {
 			if msg.Kind == domain.KindHandoff {
 				continue
 			}
-			text := strings.Join(strings.Fields(msg.Content), " ")
+			text := oneLine(msg.Content)
 			i := strings.Index(strings.ToLower(text), q)
 			if i < 0 {
 				continue
@@ -713,7 +716,7 @@ func (m Model) previewLines(g ThreadGroup, w, h int, now time.Time) []string {
 			head.add(styleFaint, "  "+whenLabel(msg.Timestamp, now))
 		}
 		out = append(out, "", head.String())
-		text := strings.Join(strings.Fields(stripFences(msg.Content)), " ")
+		text := oneLine(stripFences(msg.Content))
 		for i, l := range wrapText(text, w-5) {
 			if i == 3 || len(out) >= h {
 				break
