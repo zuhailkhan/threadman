@@ -106,3 +106,35 @@ jobs:
             --title "threadman $GITHUB_REF_NAME" \
             --generate-notes \
             --verify-tag
+
+  # Opens a pull request at microsoft/winget-pkgs that moves the
+  # zuhailkhan.threadman package to this release's Windows .exe. It runs here
+  # rather than in a workflow triggered by the release, because a release made
+  # with the workflow's own token doesn't trigger other workflows.
+  #
+  # Needs the WINGET_TOKEN secret: a classic personal access token with the
+  # public_repo and workflow scopes, for the account that owns the
+  # winget-pkgs fork. Without it the job is skipped with a notice.
+  winget:
+    name: publish to winget
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for token
+        id: token
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if [ -n "$WINGET_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::WINGET_TOKEN is not set, so the winget pull request was not opened."
+          fi
+      # Pinned to a commit: the step holds a token that can push to the fork.
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # main, 2026-10-07
+        if: steps.token.outputs.present == 'true'
+        with:
+          identifier: zuhailkhan.threadman
+          installers-regex: '_windows_amd64\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}
