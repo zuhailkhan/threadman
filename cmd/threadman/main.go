@@ -27,15 +27,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	dbDir := filepath.Join(home, ".local", "share", "threadman")
-	if err := os.MkdirAll(dbDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	dbPath := filepath.Join(home, ".local", "share", "threadman", "threads.db")
+	if err := sqlite.PrepareDatabaseFile(dbPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error preparing store: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Hooks and the TUI can write at the same moment; the busy timeout makes
 	// one wait for the other instead of failing with "database is locked".
-	repo, err := sqlite.NewRepository(filepath.Join(dbDir, "threads.db") + "?_fk=1&_busy_timeout=5000")
+	repo, err := sqlite.NewRepository(dbPath + "?_fk=1&_busy_timeout=5000")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error opening store: %v\n", err)
 		os.Exit(1)
@@ -64,7 +64,7 @@ func main() {
 	}
 
 	if err := cli.Execute(svc, cfgPath, func() {
-		m := tui.New(svc, filepath.Join(dbDir, "threads.db"), writers, handoff.NewSummarizer(cfgPath))
+		m := tui.New(svc, dbPath, writers, handoff.NewSummarizer(cfgPath))
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
