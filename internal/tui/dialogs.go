@@ -461,7 +461,7 @@ var helpGroups = []struct {
 	{"Threads", []keyHint{{"↵", "open"}, {"/", "search"}, {"tab", "next tool"}, {"A", "show archived"}, {"s", "sync now"}}},
 	{"Act", []keyHint{{"space", "select"}, {"m", "merge"}, {"n", "rename"}, {"a", "archive"}, {"d", "delete"}}},
 	{"Reading", []keyHint{{"j/k", "scroll"}, {"[ ]", "prev/next prompt"}, {"g G", "top/bottom"}, {"h", "hand off"}, {"r", "resume"}}},
-	{"Setup", []keyHint{{"L", "LLM for summaries"}, {"H", "live hooks"}, {"q", "quit"}}},
+	{"Setup", []keyHint{{":", "all commands"}, {"L", "LLM for summaries"}, {"H", "live hooks"}, {"q", "quit"}}},
 }
 
 func (m Model) viewHelp(base string) string {

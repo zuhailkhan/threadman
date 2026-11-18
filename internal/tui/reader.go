@@ -306,7 +306,7 @@ func (m Model) viewThread() string {
 		}
 	}
 	status := fmt.Sprintf("%s · %d%%", plural(total, "message"), int(m.viewport.ScrollPercent()*100))
-	keys := []keyHint{{"j/k", "scroll"}, {"[ ]", "prompt"}, {"h", "hand off"}, {"r", "resume"}, {"esc", "back"}, {"?", "keys"}}
+	keys := []keyHint{{"j/k", "scroll"}, {"[ ]", "prompt"}, {"h", "hand off"}, {"r", "resume"}, {"esc", "back"}, {":", "commands"}, {"?", "keys"}}
 
 	var b strings.Builder
 	b.WriteString(header + "\n")

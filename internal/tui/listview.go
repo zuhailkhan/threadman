@@ -538,13 +538,13 @@ func (m Model) viewList() string {
 		body = joinColumns(bodyH, "", []int{listW}, left)
 	}
 
-	keys := []keyHint{{"↵", "open"}, {"/", "search"}, {"tab", "tool"}, {"space", "select"}, {"d", "delete"}, {"?", "keys"}}
+	keys := []keyHint{{"↵", "open"}, {"/", "search"}, {"space", "select to merge"}, {":", "commands"}, {"?", "keys"}}
 	right := m.llmFooter()
 	switch {
 	case m.state == stateSearch:
 		keys = []keyHint{{"type", "filter"}, {"↵", "done"}, {"esc", "clear"}}
 	case len(m.mergeSelected) > 0:
-		keys = []keyHint{{"space", "select"}, {"m", "merge"}, {"esc", "clear"}}
+		keys = []keyHint{{"space", "select"}, {"m", "merge"}, {"esc", "clear"}, {":", "commands"}}
 		right = fmt.Sprintf("%d selected", len(m.mergeSelected))
 	}
 
@@ -572,9 +572,7 @@ func (m Model) listRow(i, width int, now time.Time) []string {
 	}
 
 	one := choiceRow(selected)
-	if picked {
-		one.add(styleCursor, "✓ ")
-	}
+	m.addCheckbox(one, picked)
 	icons := toolIcons(one.sub(), groupTools(g)).space(1)
 	title := fit(displayTitle(g.Primary), width-one.width()-icons.width()-2)
 	one.add(titleStyle, title)
@@ -590,6 +588,10 @@ func (m Model) listRow(i, width int, now time.Time) []string {
 		two.space(1)
 	}
 	two.space(3)
+	if len(m.mergeSelected) > 0 {
+		// Keep the details under the title, which the checkbox moved.
+		two.space(4)
+	}
 	when := two.sub().add(styleFaint, whenLabel(groupActivity(g), now)).space(1)
 	avail := width - two.width() - when.width() - 2
 	if m.query != "" {
@@ -616,12 +618,22 @@ func (m Model) listRow(i, width int, now time.Time) []string {
 	return []string{line1, spread(two, when, width)}
 }
 
+// addCheckbox marks a row picked for a merge, or not. The boxes show on
+// every row once one is picked, and the list stays plain otherwise.
+func (m Model) addCheckbox(r *row, picked bool) {
+	switch {
+	case len(m.mergeSelected) == 0:
+	case picked:
+		r.add(styleCursor, "[x] ")
+	default:
+		r.add(styleFaint, "[ ] ")
+	}
+}
+
 // highlightTitle rebuilds a row's start with the search match marked.
 func (m Model) highlightTitle(selected, picked bool, title string, st lipgloss.Style) *row {
 	r := choiceRow(selected)
-	if picked {
-		r.add(styleCursor, "✓ ")
-	}
+	m.addCheckbox(r, picked)
 	addHighlighted(r, title, m.query, st)
 	return r
 }

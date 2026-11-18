@@ -145,7 +145,7 @@ A conversation longer than the model's context window is summarized in parts: th
 
 ### Merging threads
 
-Work on one thing often ends up spread over separate sessions: one started fresh when the context filled up, another tried in a different tool. To continue from all of them, select their rows in the thread list with Space and press `m`, then choose the tool for the new session.
+Work on one thing often ends up spread over separate sessions: one started fresh when the context filled up, another tried in a different tool. To continue from all of them, select their rows in the thread list with Space and press `m`, then choose the tool for the new session. Once a row is selected, every row shows a checkbox, `[x]` or `[ ]`, until you merge or press Esc.
 
 The new session holds one handoff block with a section per thread, oldest first. Each section gives the thread's tool, project, dates and message count, the command to read it in full, and a detailed brief of it (goal, current state, decisions in force, rejected approaches, open questions, next steps). Every thread gets its own brief, so a short one isn't drowned out by a long one. Only the newest thread's last 2 messages are kept word for word, since that is where the work stopped. The block says the threads ran separately and that where they disagree, the later one is more likely to be current.
 
@@ -153,7 +153,9 @@ A merge always writes a new session, which runs in the newest thread's workspace
 
 ### TUI Keybindings
 
-Press `?` in the thread list or the reader to see every key. The footer shows the keys that work on the current screen.
+Press `:` or Ctrl+P in the thread list or the reader to open the command palette: every action that works on that screen, with its key. Type part of a name to filter, and press Enter to run it. An action that can't run yet is dimmed with the reason.
+
+Press `?` to see every key. The footer shows the most used keys on the current screen.
 
 | Key | Action |
 |-----|--------|
@@ -176,6 +178,7 @@ Press `?` in the thread list or the reader to see every key. The footer shows th
 | h | Handoff current thread to another provider |
 | L | Set up the LLM used for handoff summaries |
 | r | Resume current thread in its native provider CLI |
+| : / Ctrl+P | Open the command palette |
 | ? | Show every key |
 
 Each tool has an icon: ✻ Claude Code, ▣ OpenCode, π pi, ▲ Antigravity, ◎ Codex and ✦ Gemini. They are plain Unicode and work in any terminal. With a [Nerd Font](https://www.nerdfonts.com) 3.5 or newer, set `THREADMAN_ICONS=nerd` (or `NERD_FONT=1`) to use its glyphs instead, including the Claude logo. A terminal can't tell threadman which font it uses, so this is a setting rather than detected.

@@ -133,6 +133,11 @@ type Model struct {
 	listTop int
 	// help shows the full key list over the current screen.
 	help bool
+	// palette is the open command list, nil when closed.
+	palette *palette
+	// llmAsked is set while a check the user asked for runs, so its result
+	// is reported.
+	llmAsked bool
 	// failure is an error shown in full in a dialog until it is dismissed.
 	failure *failure
 	// While a handoff or merge runs: its progress, the channel it comes on,
@@ -251,6 +256,21 @@ func (m Model) checkLLM() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return llmStatusMsg{s.Check(ctx)}
+	}
+}
+
+// reportLLMCheck shows the result of a check the user asked for: a line in
+// the footer when it worked or nothing is set up, the full error otherwise.
+func (m *Model) reportLLMCheck() {
+	s := m.llmStatus
+	switch {
+	case s.Err != nil:
+		m.status = m.llmSummary()
+		m.failure = &failure{title: "LLM check failed", err: s.Err}
+	case !s.Configured:
+		m.status = "LLM: not configured, press L to set one up"
+	default:
+		m.status = m.llmSummary()
 	}
 }
 
@@ -480,6 +500,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case llmStatusMsg:
 		m.llmStatus = msg.status
 		m.llmChecking = false
+		if m.llmAsked {
+			m.llmAsked = false
+			m.reportLLMCheck()
+		}
 		if m.state == stateHandoffMode {
 			m.handoffModeCursor = m.firstUsableMode()
 		}
@@ -604,9 +628,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if msg.String() == "?" && (m.state == stateList || m.state == stateThread) {
-		m.help = true
-		return m, nil
+	if m.palette != nil {
+		return m.handlePaletteKey(msg)
+	}
+	if m.state == stateList || m.state == stateThread {
+		switch msg.String() {
+		case "?":
+			m.help = true
+			return m, nil
+		case ":", "ctrl+p":
+			m.openPalette()
+			return m, nil
+		}
 	}
 	switch m.state {
 
@@ -799,6 +832,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.handoffCursor = first
 			m.state = stateHandoffPicker
+		case "L":
+			m.openLLMSetup()
 		case "]":
 			m.jumpPrompt(1)
 		case "[":
@@ -1117,6 +1152,9 @@ func (m Model) View() string {
 	}
 	if m.help {
 		return m.viewHelp(v)
+	}
+	if m.palette != nil {
+		return m.viewPalette(v)
 	}
 	return v
 }
