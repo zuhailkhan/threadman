@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/ports"
+	_ "modernc.org/sqlite"
 )
 
 type Provider struct {
@@ -33,7 +33,7 @@ func (p *Provider) Name() string {
 }
 
 func (p *Provider) openDB() (*sql.DB, error) {
-	return sql.Open("sqlite3", "file:"+p.dbPath+"?mode=ro")
+	return sql.Open("sqlite", "file:"+p.dbPath+"?mode=ro")
 }
 
 func (p *Provider) DiscoverThreads(ctx context.Context) ([]domain.Thread, error) {

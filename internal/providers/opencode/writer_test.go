@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/zuhailkhan/threadman/internal/domain"
+	_ "modernc.org/sqlite"
 )
 
 func setupTestDB(t *testing.T) (string, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test.db")
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}

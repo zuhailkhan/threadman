@@ -21,7 +21,7 @@ import (
 func setupV2DB(t *testing.T) (string, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "opencode.db")
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}

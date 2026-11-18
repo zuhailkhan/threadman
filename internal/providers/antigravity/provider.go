@@ -18,9 +18,9 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/ports"
+	_ "modernc.org/sqlite"
 )
 
 const providerName = "antigravity"
@@ -65,7 +65,7 @@ func (p *Provider) conversationPath(id string) string {
 }
 
 func openReadOnly(path string) (*sql.DB, error) {
-	return sql.Open("sqlite3", "file:"+path+"?mode=ro")
+	return sql.Open("sqlite", "file:"+path+"?mode=ro")
 }
 
 // summary is what the CLI's own conversation index knows about a conversation.

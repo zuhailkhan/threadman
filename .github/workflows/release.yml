@@ -1,9 +1,10 @@
 name: Release
 
 # Pushing a v* tag builds a binary on each platform and publishes a GitHub
-# release. go-sqlite3 needs CGO, so every binary is built on a matching runner
-# rather than cross-compiled. Pull requests that touch this file run the build
-# jobs only, to check them before a tag is pushed.
+# release. threadman is pure Go (CGO off), so the binaries are static and the
+# Linux ones don't depend on the system's glibc. Each is still built on a
+# matching runner so it can be smoke-tested there. Pull requests that touch
+# this file run the build jobs only, to check them before a tag is pushed.
 on:
   push:
     tags: ["v*"]
@@ -24,13 +25,13 @@ jobs:
           - { runner: ubuntu-latest,    goos: linux,   goarch: amd64, ext: tar.gz }
           - { runner: ubuntu-24.04-arm, goos: linux,   goarch: arm64, ext: tar.gz }
           - { runner: macos-latest,     goos: darwin,  goarch: arm64, ext: tar.gz }
-          # Cross-built on the arm64 runner: Apple's clang targets x86_64 itself.
+          # Cross-compiled on the arm64 runner, so it can't be smoke-tested.
           - { runner: macos-latest,     goos: darwin,  goarch: amd64, ext: tar.gz }
           - { runner: windows-latest,   goos: windows, goarch: amd64, ext: zip }
     env:
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
-      CGO_ENABLED: "1"
+      CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
