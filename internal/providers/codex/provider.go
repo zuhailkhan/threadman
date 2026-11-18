@@ -186,6 +186,8 @@ type sessionMeta struct {
 	Source         json.RawMessage `json:"source"`
 	ThreadSource   string          `json:"thread_source"`
 	ParentThreadID string          `json:"parent_thread_id"`
+	Originator     string          `json:"originator"`
+	ModelProvider  string          `json:"model_provider"`
 }
 
 // isUserThread reports whether the session is one the user held, rather than
