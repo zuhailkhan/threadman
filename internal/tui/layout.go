@@ -19,6 +19,36 @@ func fit(s string, w int) string {
 	return ansi.Truncate(s, w, "…")
 }
 
+// isControl reports characters a terminal acts on rather than draws.
+func isControl(r rune) bool {
+	return (r < 0x20 && r != '\n') || r == 0x7f || (r >= 0x80 && r < 0xa0)
+}
+
+// cleanText makes conversation text safe to draw. Text from sessions can hold
+// Windows line endings, tabs, colour codes from tool output and other control
+// characters; a carriage return, for one, sends the cursor back to the start
+// of the row and scrambles everything drawn after it.
+func cleanText(s string) string {
+	if !strings.ContainsFunc(s, isControl) {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.ReplaceAll(s, "\t", "    ")
+	s = ansi.Strip(s)
+	return strings.Map(func(r rune) rune {
+		if isControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// oneLine is cleaned text on a single line, for titles and excerpts.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(cleanText(s)), " ")
+}
+
 // wrapText breaks plain text into lines of at most w cells, keeping its own
 // line breaks.
 func wrapText(s string, w int) []string {
