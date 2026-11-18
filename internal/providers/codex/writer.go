@@ -61,6 +61,7 @@ func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string,
 		"originator":        "threadman",
 		"cli_version":       "0.0.0",
 		"source":            "cli",
+		"model_provider":    sessionModelProvider(w.home),
 		"base_instructions": nil,
 	}}); err != nil {
 		return "", err
