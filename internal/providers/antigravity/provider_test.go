@@ -70,7 +70,7 @@ type step struct {
 
 func withDB(t *testing.T, path string, stmts ...func(db *sql.DB) error) {
 	t.Helper()
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -72,7 +72,7 @@ func (w *Writer) resolveVersion(db *sql.DB) string {
 }
 
 func (w *Writer) WriteThread(ctx context.Context, thread domain.Thread) (string, error) {
-	db, err := sql.Open("sqlite3", w.dbPath)
+	db, err := sql.Open("sqlite", w.dbPath)
 	if err != nil {
 		return "", fmt.Errorf("open db: %w", err)
 	}
@@ -195,7 +195,7 @@ func (w *Writer) AppendMessages(ctx context.Context, target domain.Thread, messa
 	if dbPath == "" {
 		dbPath = w.dbPath
 	}
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
@@ -237,7 +237,7 @@ func (w *Writer) AppendMessages(ctx context.Context, target domain.Thread, messa
 }
 
 func (w *Writer) DeleteThread(ctx context.Context, thread domain.Thread) error {
-	db, err := sql.Open("sqlite3", thread.SourceFilePath)
+	db, err := sql.Open("sqlite", thread.SourceFilePath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}

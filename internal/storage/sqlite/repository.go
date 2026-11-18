@@ -2,28 +2,35 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	"github.com/zuhailkhan/threadman/ent"
 	"github.com/zuhailkhan/threadman/ent/message"
 	"github.com/zuhailkhan/threadman/ent/thread"
 	"github.com/zuhailkhan/threadman/internal/domain"
 
-	_ "github.com/mattn/go-sqlite3"
+	// A SQLite written in pure Go, so threadman builds without a C compiler.
+	_ "modernc.org/sqlite"
 )
 
 type Repository struct {
 	client *ent.Client
 }
 
-func NewRepository(dbPath string) (*Repository, error) {
-	client, err := ent.Open("sqlite3", dbPath)
+// NewRepository opens the database at dsn: a file name or "file:" URI,
+// optionally followed by connection parameters such as _fk=1.
+func NewRepository(dsn string) (*Repository, error) {
+	db, err := sql.Open("sqlite", withTimeFormat(dsn))
 	if err != nil {
 		return nil, err
 	}
+	client := ent.NewClient(ent.Driver(entsql.OpenDB(dialect.SQLite, db)))
 
 	if err := client.Schema.Create(context.Background()); err != nil {
 		client.Close()
@@ -31,6 +38,18 @@ func NewRepository(dbPath string) (*Repository, error) {
 	}
 
 	return &Repository{client: client}, nil
+}
+
+// withTimeFormat makes the driver write times as SQLite's own text format,
+// "2006-01-02 15:04:05.000-07:00", the layout earlier versions of threadman
+// wrote and the one the driver reads first. Left to its default it would
+// write Go's time.String().
+func withTimeFormat(dsn string) string {
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + "_time_format=sqlite"
 }
 
 func computeDeleteHash(t domain.Thread) string {

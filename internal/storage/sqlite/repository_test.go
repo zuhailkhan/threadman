@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/zuhailkhan/threadman/internal/domain"
+	_ "modernc.org/sqlite"
 )
 
 func setupTestRepo(t *testing.T) *Repository {

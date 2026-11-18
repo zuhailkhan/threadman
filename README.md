@@ -220,7 +220,7 @@ cd threadman
 go build -o threadman ./cmd/threadman
 ```
 
-> Requires Go 1.26.2 or newer and a C compiler (`gcc`) — `go-sqlite3` uses CGO.
+> Requires Go 1.26.2 or newer. No C compiler is needed: threadman uses a pure-Go SQLite (`modernc.org/sqlite`).
 
 ## Project Structure
 
