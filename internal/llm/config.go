@@ -85,6 +85,9 @@ type Config struct {
 	Model    string `json:"model"`
 	BaseURL  string `json:"base_url,omitempty"`
 	APIKey   string `json:"api_key,omitempty"`
+	// ContextTokens is the model's context window, for a server that doesn't
+	// report it; 0 to ask the server or assume the provider's.
+	ContextTokens int `json:"context_tokens,omitempty"`
 }
 
 // file is the on-disk shape; the llm block is nested so the file can hold
@@ -175,6 +178,9 @@ func (c Config) normalized() (Config, error) {
 	}
 	if c.Model == "" {
 		return Config{}, fmt.Errorf("provider %s needs a model name", c.Provider)
+	}
+	if c.ContextTokens < 0 {
+		return Config{}, fmt.Errorf("the context window can't be negative")
 	}
 	return c, nil
 }

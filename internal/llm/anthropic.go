@@ -12,8 +12,9 @@ import (
 )
 
 type anthropicClient struct {
-	client anthropic.Client
-	model  string
+	client  anthropic.Client
+	model   string
+	context int
 }
 
 func newAnthropicClient(cfg Config) *anthropicClient {
@@ -26,7 +27,7 @@ func newAnthropicClient(cfg Config) *anthropicClient {
 	if cfg.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
 	}
-	return &anthropicClient{client: anthropic.NewClient(opts...), model: cfg.Model}
+	return &anthropicClient{client: anthropic.NewClient(opts...), model: cfg.Model, context: cfg.ContextTokens}
 }
 
 func (c *anthropicClient) Complete(ctx context.Context, system, user string) (string, error) {
@@ -91,6 +92,6 @@ func describeAnthropicError(err error) error {
 	case http.StatusTooManyRequests:
 		return fmt.Errorf("Claude API rate limit reached; try again shortly")
 	default:
-		return err
+		return asContextError(err, err.Error())
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,7 +26,9 @@ const (
 	// mergeKeepRecent is how many of the newest thread's messages are kept
 	// word for word.
 	mergeKeepRecent = 2
-	// mergeConcurrency is how many briefs are written at once.
+	// mergeConcurrency is how many briefs are written at once by a hosted
+	// model. A local one writes them one by one: requests sent to it together
+	// can share one context, and a long thread would crowd out the others.
 	mergeConcurrency = 3
 )
 
@@ -118,41 +121,74 @@ func BuildMerge(ctx context.Context, c llm.Client, summarizer string, threads []
 	return out, h, nil
 }
 
-// writeBriefs summarizes the part of each thread before its split, a few at a
-// time. A thread with nothing before its split gets no brief.
+// writeBriefs summarizes the part of each thread before its split. A hosted
+// model writes a few at a time; a local one writes them one by one, oldest
+// first. A thread with nothing before its split gets no brief.
 func writeBriefs(ctx context.Context, c llm.Client, threads []domain.Thread, splits []int) ([]string, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	briefs := make([]string, len(threads))
 	errs := make([]error, len(threads))
-	sem := make(chan struct{}, mergeConcurrency)
-	var wg sync.WaitGroup
-	for i, t := range threads {
-		if splits[i] == 0 {
-			continue
+	probe, lim := newSummarizer(ctx, c)
+	var done atomic.Int32
+	parent := progressFunc(ctx)
+
+	one := func(i int, t domain.Thread) {
+		partial := splits[i] < len(t.Messages)
+		// Each thread learns the context on its own copy, since they can run
+		// side by side.
+		s := &summarizer{c: c, limit: probe.limit}
+		tctx := ctx
+		if parent != nil {
+			tctx = WithProgress(ctx, func(p Progress) {
+				p.Thread, p.Threads, p.Done = i+1, len(threads), int(done.Load())
+				parent(p)
+			})
 		}
-		wg.Add(1)
-		go func(i int, t domain.Thread) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				errs[i] = ctx.Err()
-				return
-			}
-			defer func() { <-sem }()
-			partial := splits[i] < len(t.Messages)
-			brief, err := c.Complete(ctx, mergePrompt(partial), renderTranscript(t, splits[i], false))
-			if err != nil {
-				errs[i] = fmt.Errorf("summarize %q: %w", threadTitle(t), err)
-				cancel()
-				return
-			}
-			briefs[i] = brief
-		}(i, t)
+		brief, err := s.brief(tctx, mergePrompt(partial), t, splits[i], false)
+		done.Add(1)
+		if err != nil {
+			errs[i] = fmt.Errorf("summarize %q: %w", threadTitle(t), err)
+			cancel()
+			return
+		}
+		briefs[i] = brief
 	}
-	wg.Wait()
+
+	if lim.Local {
+		for i, t := range threads {
+			if splits[i] == 0 {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				errs[i] = err
+				break
+			}
+			one(i, t)
+		}
+	} else {
+		sem := make(chan struct{}, mergeConcurrency)
+		var wg sync.WaitGroup
+		for i, t := range threads {
+			if splits[i] == 0 {
+				continue
+			}
+			wg.Add(1)
+			go func(i int, t domain.Thread) {
+				defer wg.Done()
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					errs[i] = ctx.Err()
+					return
+				}
+				defer func() { <-sem }()
+				one(i, t)
+			}(i, t)
+		}
+		wg.Wait()
+	}
 	// Report the error that stopped the merge, not the cancellations it caused.
 	var first error
 	for _, err := range errs {

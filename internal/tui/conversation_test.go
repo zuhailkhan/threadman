@@ -88,7 +88,7 @@ func TestHandoffCatchesUpExistingSession(t *testing.T) {
 		t.Errorf("mode dialog:\n%s", m.View())
 	}
 	m, write := press(t, m, "enter")
-	written := write().(handoffWrittenMsg)
+	written := workResult(t, write).(handoffWrittenMsg)
 
 	if len(claudeWriter.written) != 0 || len(claudeWriter.appended) != 1 {
 		t.Fatalf("want one append and no new session, got %d writes and %d appends", len(claudeWriter.written), len(claudeWriter.appended))
@@ -196,7 +196,7 @@ func TestConversationWithDeletedSession(t *testing.T) {
 	}
 	m, _ = press(t, m, "enter")
 	m, write := press(t, m, "enter")
-	written := write().(handoffWrittenMsg)
+	written := workResult(t, write).(handoffWrittenMsg)
 	if written.appended || len(claudeWriter.written) != 1 {
 		t.Fatalf("want a new session, got appended=%v writes=%d", written.appended, len(claudeWriter.written))
 	}
