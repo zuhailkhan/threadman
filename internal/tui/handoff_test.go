@@ -129,7 +129,7 @@ func TestHandoffModeDialogWithoutLLM(t *testing.T) {
 	if m.state != stateHandoffWorking {
 		t.Fatalf("state after choosing a mode = %v", m.state)
 	}
-	written := write()
+	written := workResult(t, write)
 	next, record := m.Update(written)
 	m = asModel(next)
 	if m.state != stateHandoffConfirm || m.handoffSessionID != "new-session" {
@@ -192,7 +192,7 @@ func TestHandoffCancel(t *testing.T) {
 
 	// The write was already in flight; its result must not surface an error
 	// or write a session.
-	next, _ := m.Update(write())
+	next, _ := m.Update(workResult(t, write))
 	m = asModel(next)
 	if m.state != stateThread || m.status != "handoff cancelled" {
 		t.Errorf("late result changed the screen: state %v, status %q", m.state, m.status)

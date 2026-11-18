@@ -34,15 +34,19 @@ func New(cfg Config) (Client, error) {
 	if key == "" && presets[cfg.Provider].needsKey {
 		return nil, fmt.Errorf("no API key for %s: set $%s or run 'threadman llm set --api-key ...'", cfg.Provider, presets[cfg.Provider].keyEnv)
 	}
-	return &openAIClient{baseURL: cfg.baseURL(), apiKey: key, model: cfg.Model, http: http.DefaultClient}, nil
+	return &openAIClient{provider: cfg.Provider, baseURL: cfg.baseURL(), apiKey: key, model: cfg.Model, context: cfg.ContextTokens, http: http.DefaultClient}, nil
 }
 
 // openAIClient speaks the OpenAI chat-completions API, which ChatGPT,
 // DeepSeek, Ollama and LM Studio all serve.
 type openAIClient struct {
-	baseURL string
-	apiKey  string
-	model   string
+	provider string
+	baseURL  string
+	apiKey   string
+	model    string
+	// context is the context window set in the config; 0 to ask the server
+	// or assume the provider's.
+	context int
 	http    *http.Client
 }
 
@@ -82,7 +86,7 @@ func (c *openAIClient) Complete(ctx context.Context, system, user string) (strin
 	}
 	text := strings.TrimSpace(thinkBlock.ReplaceAllString(out.Choices[0].Message.Content, ""))
 	if out.Choices[0].FinishReason == "length" {
-		return "", fmt.Errorf("the model ran out of room before finishing its reply (the conversation may be too long for %s)", c.model)
+		return "", &ContextError{Err: fmt.Errorf("the model ran out of room before finishing its reply (the conversation may be too long for %s)", c.model)}
 	}
 	if text == "" {
 		return "", fmt.Errorf("the model returned an empty reply")
@@ -141,7 +145,7 @@ func (c *openAIClient) do(ctx context.Context, method, path string, body []byte,
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("%s: %s", resp.Status, errorMessage(data))
+		return asContextError(fmt.Errorf("%s: %s", resp.Status, errorMessage(data)), string(data))
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("unexpected response from %s: %w", c.baseURL, err)

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zuhailkhan/threadman/internal/domain"
 	"github.com/zuhailkhan/threadman/internal/handoff"
+	"github.com/zuhailkhan/threadman/internal/llm"
 	"github.com/zuhailkhan/threadman/internal/ports"
 )
 
@@ -182,8 +183,8 @@ func (m Model) viewHandoff() string {
 		if m.handoffMode.NeedsLLM() {
 			text = "Summarizing with " + m.llmStatus.Label + "…"
 		}
-		lines = append(lines, styleCursor.Render("● ")+styleBold.Render(text))
-		if m.handoffMode.NeedsLLM() {
+		lines = append(lines, m.workingLines(text, iw)...)
+		if m.handoffMode.NeedsLLM() && !m.progressSeen {
 			lines = append(lines, "", styleFaint.Render("This can take a minute for long threads."))
 		}
 		keys = []keyHint{{"esc", "cancel"}}
@@ -307,8 +308,10 @@ func (m Model) viewMergeProgress(pw int) string {
 		lines = m.confirmLines(iw)
 		keys = []keyHint{{"y", "open now"}, {"n", "not now"}}
 	} else {
-		lines = []string{styleCursor.Render("● ") + styleBold.Render(fmt.Sprintf("Summarizing %d threads with %s…", len(m.mergeGroups), m.llmStatus.Label)),
-			"", styleFaint.Render("This can take a minute for long threads.")}
+		lines = m.workingLines(fmt.Sprintf("Summarizing %d threads with %s…", len(m.mergeGroups), m.llmStatus.Label), iw)
+		if !m.progressSeen {
+			lines = append(lines, "", styleFaint.Render("This can take a minute for long threads."))
+		}
 		keys = []keyHint{{"esc", "cancel"}}
 	}
 	lines = append(lines, "", renderKeys(keys).String())
@@ -425,6 +428,29 @@ func (m Model) viewOnboarding() string {
 	}
 	lines = append(lines, "", renderKeys([]keyHint{{"↑↓", "move"}, {"space", "toggle"}, {"↵", "import"}, {"q", "quit"}}).String())
 	return centered(panel("Welcome", styleCursor, colorFaint, lines, pw), m.width, m.height)
+}
+
+// failure is a handoff or merge that failed, shown in full: the footer has
+// room for a line of it at most.
+type failure struct {
+	title string
+	err   error
+}
+
+func (m Model) viewFailure(base string) string {
+	pw := dialogWidth(76, m.width)
+	iw := pw - 4
+	lines := wrapStyled(cleanText(m.failure.err.Error()), iw, styleFg)
+	if llm.IsContextError(m.failure.err) {
+		lines = append(lines, "")
+		lines = append(lines, wrapStyled("The conversation is longer than the model can take at once. Load the model with a larger context, choose a model with a larger one (press L), or set the context window with 'threadman llm set ... --context <tokens>' so threadman summarizes in parts that fit.", iw, styleHint)...)
+	}
+	// Keep the dialog on screen for a very long error.
+	if maxLines := m.height - 8; maxLines > 3 && len(lines) > maxLines {
+		lines = append(lines[:maxLines-1], styleFaint.Render("…"))
+	}
+	lines = append(lines, "", renderKeys([]keyHint{{"esc", "close"}}).String())
+	return overlay(base, panel(m.failure.title, styleErr.Bold(true), colorErr, lines, pw), m.width, m.height)
 }
 
 // helpGroups is the full key list, shown with ?.

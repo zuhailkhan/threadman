@@ -123,7 +123,7 @@ The two summary modes need an LLM. Without one, or when it cannot be reached, on
 Press `L` in the thread list or in the mode dialog to set the LLM up in the TUI: choose a provider with ←/→, fill in the model, and optionally a base URL and API key, then press Enter to save and check the connection. The same settings are available from the command line:
 
 ```bash
-threadman llm set --provider <name> [--model <model>] [--base-url <url>] [--api-key <key>]
+threadman llm set --provider <name> [--model <model>] [--base-url <url>] [--api-key <key>] [--context <tokens>]
 threadman llm show    # current settings
 threadman llm test    # check the server, credentials and model
 threadman llm clear
@@ -139,7 +139,9 @@ threadman llm clear
 
 `--model` is required except for `claude` (defaults to `claude-opus-5-5`) and `deepseek` (defaults to `deepseek-chat`). Any other server that speaks the OpenAI chat-completions API works with `--provider openai --base-url <url>`. The hosted APIs bill per token, separately from any chat subscription; Ollama and LM Studio run locally. Settings are stored in `~/.config/threadman/config.json`. An API key you enter is kept in the system keyring (Windows Credential Manager, macOS Keychain, or the Secret Service on Linux) and not in that file; only when no keyring is available is it written to the file instead. `threadman llm show` reports which one is in use.
 
-threadman checks the LLM when it starts and shows the result in the status bar, and checks again each time the mode dialog opens. A conversation too long for the model fails with the provider's error rather than being cut short; hand off the full transcript instead.
+threadman checks the LLM when it starts and shows the result in the status bar, and checks again each time the mode dialog opens.
+
+A conversation longer than the model's context window is summarized in parts: threadman reads it in consecutive pieces that fit, has the model take notes on each, then writes the brief from the notes. It learns the window from LM Studio and Ollama (the length the model is loaded with) and assumes 200k tokens for Claude, 128k for OpenAI and 64k for DeepSeek. For any other server, or to override, set it with `threadman llm set ... --context <tokens>`; `threadman llm test` shows the window in use. If a request is still rejected as too long, threadman takes the limit from the error and tries again in smaller parts. A failed handoff or merge shows its full error in a dialog.
 
 ### Merging threads
 
@@ -147,7 +149,7 @@ Work on one thing often ends up spread over separate sessions: one started fresh
 
 The new session holds one handoff block with a section per thread, oldest first. Each section gives the thread's tool, project, dates and message count, the command to read it in full, and a detailed brief of it (goal, current state, decisions in force, rejected approaches, open questions, next steps). Every thread gets its own brief, so a short one isn't drowned out by a long one. Only the newest thread's last 2 messages are kept word for word, since that is where the work stopped. The block says the threads ran separately and that where they disagree, the later one is more likely to be current.
 
-A merge always writes a new session, which runs in the newest thread's workspace. It needs an LLM, with one call per thread. Up to 8 threads can be merged at once. A row that is already a conversation across tools counts as one thread. The threads merged are left unchanged and stay in the list; the new session is a conversation of its own, titled after the newest thread with "(merged from N)".
+A merge always writes a new session, which runs in the newest thread's workspace. It needs an LLM, with one call per thread, or more for a thread summarized in parts. With a local model the threads are summarized one at a time, since requests sent to it together can share one context. Up to 8 threads can be merged at once. A row that is already a conversation across tools counts as one thread. The threads merged are left unchanged and stay in the list; the new session is a conversation of its own, titled after the newest thread with "(merged from N)".
 
 ### TUI Keybindings
 

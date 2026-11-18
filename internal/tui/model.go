@@ -132,7 +132,16 @@ type Model struct {
 	// listTop is the first line of the list on screen.
 	listTop int
 	// help shows the full key list over the current screen.
-	help         bool
+	help bool
+	// failure is an error shown in full in a dialog until it is dismissed.
+	failure *failure
+	// While a handoff or merge runs: its progress, the channel it comes on,
+	// and the spinner.
+	progress     handoff.Progress
+	progressCh   chan handoff.Progress
+	progressSeen bool
+	workStart    time.Time
+	spin         int
 	deleteCursor int
 	// onboardingHooks installs live-update hooks after the first import.
 	onboardingHooks bool
@@ -498,12 +507,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.merging {
 			// The selection is kept so the merge can be retried.
 			m.status = "merge error: " + msg.err.Error()
+			m.failure = &failure{title: "Merge failed", err: msg.err}
 			m.merging = false
 			m.state = stateList
 			return m, nil
 		}
 		m.status = "handoff error: " + msg.err.Error()
+		m.failure = &failure{title: "Handoff failed", err: msg.err}
 		m.state = stateThread
+
+	case progressMsg:
+		// A report from work that was cancelled or replaced is dropped.
+		if msg.ch != m.progressCh || m.state != stateHandoffWorking {
+			return m, nil
+		}
+		m.progress = msg.p
+		m.progressSeen = true
+		return m, listenProgress(msg.ch)
+
+	case spinMsg:
+		if m.state != stateHandoffWorking || !msg.start.Equal(m.workStart) {
+			return m, nil
+		}
+		m.spin++
+		return m, spinTick(m.workStart)
 
 	case handoffLinkErrMsg:
 		m.status = "warning: handoff link: " + msg.err.Error()
@@ -559,6 +586,15 @@ func (m Model) setupHooksCmd() tea.Cmd {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.failure != nil {
+		switch msg.String() {
+		case "esc", "enter", "q":
+			m.failure = nil
+		case "ctrl+c":
+			return m, tea.Quit
+		}
+		return m, nil
+	}
 	if m.help {
 		switch msg.String() {
 		case "esc", "?", "q":
@@ -840,7 +876,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.merging = true
 			m.status = ""
 			m.state = stateHandoffWorking
-			return m, m.writeMerge(ctx, m.targetWriters()[m.handoffCursor], m.mergeGroups)
+			target, groups := m.targetWriters()[m.handoffCursor], m.mergeGroups
+			return m, m.startWork(ctx, func(ctx context.Context) tea.Cmd { return m.writeMerge(ctx, target, groups) })
 		}
 
 	case stateHandoffMode:
@@ -873,7 +910,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.handoffMode = mode
 			m.status = ""
 			m.state = stateHandoffWorking
-			return m, m.writeHandoff(ctx, m.handoffChoice, mode)
+			choice := m.handoffChoice
+			return m, m.startWork(ctx, func(ctx context.Context) tea.Cmd { return m.writeHandoff(ctx, choice, mode) })
 		}
 
 	case stateHandoffWorking:
@@ -1073,6 +1111,9 @@ func (m Model) View() string {
 		v = m.viewDelete()
 	default:
 		v = m.viewList()
+	}
+	if m.failure != nil {
+		return m.viewFailure(v)
 	}
 	if m.help {
 		return m.viewHelp(v)

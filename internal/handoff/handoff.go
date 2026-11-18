@@ -249,7 +249,8 @@ func build(ctx context.Context, c llm.Client, summarizer string, t domain.Thread
 			system = lightPrompt
 		}
 		var err error
-		summary, err = c.Complete(ctx, system, renderTranscript(t, split, catchUp))
+		s, _ := newSummarizer(ctx, c)
+		summary, err = s.brief(ctx, system, t, split, catchUp)
 		if err != nil {
 			return domain.Thread{}, domain.Handoff{}, err
 		}
@@ -487,37 +488,32 @@ func writeTurn(b *strings.Builder, m domain.Message, threadProvider string, tool
 // model that can see them tends to repeat them in the brief.
 func renderTranscript(t domain.Thread, split int, catchUp bool) string {
 	var b strings.Builder
-	title := t.CustomTitle
-	if title == "" {
-		title = t.Title
-	}
-	if title != "" {
-		fmt.Fprintf(&b, "Conversation title: %s\n", title)
-	}
-	if t.WorkspacePath != "" {
-		fmt.Fprintf(&b, "Working directory: %s\n", t.WorkspacePath)
-	}
-	if catchUp {
-		b.WriteString("The next assistant already knows this conversation up to the start of the transcript below. The transcript holds only what happened since, in another tool; summarize that, not the conversation as a whole.\n")
-	}
+	b.WriteString(transcriptHeader(t, catchUp))
 	b.WriteString("\n<transcript>\n")
 	for i, m := range t.Messages[:split] {
-		role := string(m.Role)
-		if m.Kind == domain.KindHandoff {
-			role = "handoff received from another tool"
-		}
-		fmt.Fprintf(&b, "[turn %d · %s", i+1, role)
-		if !m.Timestamp.IsZero() {
-			fmt.Fprintf(&b, " · %s", m.Timestamp.Format("2006-01-02 15:04"))
-		}
-		b.WriteString("]\n")
-		if content := strings.TrimSpace(m.Content); content != "" {
-			b.WriteString(content)
-			b.WriteString("\n")
-		}
-		domain.WriteTools(&b, m.Tools, briefToolInput, briefToolOutput)
-		b.WriteString("\n")
+		b.WriteString(renderTurn(i, m))
 	}
 	b.WriteString("</transcript>")
+	return b.String()
+}
+
+// renderTurn lays out message i of a transcript for the summarizer.
+func renderTurn(i int, m domain.Message) string {
+	var b strings.Builder
+	role := string(m.Role)
+	if m.Kind == domain.KindHandoff {
+		role = "handoff received from another tool"
+	}
+	fmt.Fprintf(&b, "[turn %d · %s", i+1, role)
+	if !m.Timestamp.IsZero() {
+		fmt.Fprintf(&b, " · %s", m.Timestamp.Format("2006-01-02 15:04"))
+	}
+	b.WriteString("]\n")
+	if content := strings.TrimSpace(m.Content); content != "" {
+		b.WriteString(content)
+		b.WriteString("\n")
+	}
+	domain.WriteTools(&b, m.Tools, briefToolInput, briefToolOutput)
+	b.WriteString("\n")
 	return b.String()
 }

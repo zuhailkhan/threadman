@@ -29,7 +29,8 @@ func newLLMSetCmd(cfgPath string) *cobra.Command {
   threadman llm set --provider lmstudio --model qwen2.5-coder-14b
   threadman llm set --provider claude
   threadman llm set --provider openai --model <model-name>
-  threadman llm set --provider deepseek`,
+  threadman llm set --provider deepseek
+  threadman llm set --provider ollama --model llama3.2 --context 32768`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			saved, err := llm.Save(cfgPath, cfg)
@@ -47,6 +48,7 @@ func newLLMSetCmd(cfgPath string) *cobra.Command {
 	cmd.Flags().StringVar(&cfg.Model, "model", "", "model name (optional for claude and deepseek)")
 	cmd.Flags().StringVar(&cfg.BaseURL, "base-url", "", "override the provider's API address")
 	cmd.Flags().StringVar(&cfg.APIKey, "api-key", "", "store an API key in the system keyring; omit to use the provider's environment variable")
+	cmd.Flags().IntVar(&cfg.ContextTokens, "context", 0, "the model's context window in tokens, when the server doesn't report it; long conversations are summarized in parts to fit")
 	_ = cmd.MarkFlagRequired("provider")
 	return cmd
 }
@@ -72,6 +74,9 @@ func newLLMShowCmd(cfgPath string) *cobra.Command {
 				fmt.Printf("base url: %s\n", cfg.BaseURL)
 			}
 			fmt.Printf("api key:  %s\n", cfg.KeySource())
+			if cfg.ContextTokens > 0 {
+				fmt.Printf("context:  %d tokens\n", cfg.ContextTokens)
+			}
 			fmt.Printf("config:   %s\n", cfgPath)
 			return nil
 		},
@@ -101,6 +106,13 @@ func newLLMTestCmd(cfgPath string) *cobra.Command {
 				return fmt.Errorf("%s: %w", cfg.Label(), err)
 			}
 			fmt.Printf("ok: %s\n", cfg.Label())
+			if l, ok := client.(llm.Limiter); ok {
+				if n := l.Limits(ctx).Context; n > 0 {
+					fmt.Printf("context: %d tokens; longer conversations are summarized in parts\n", n)
+				} else {
+					fmt.Println("context: unknown; set it with 'threadman llm set ... --context <tokens>' if long summaries fail")
+				}
+			}
 			return nil
 		},
 	}

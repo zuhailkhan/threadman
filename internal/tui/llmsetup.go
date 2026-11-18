@@ -107,6 +107,11 @@ func (f llmSetupForm) config() llm.Config {
 	if strings.TrimSpace(cfg.APIKey) == "" && f.fileKey() {
 		cfg.APIKey = f.saved.APIKey
 	}
+	// A context window set with 'threadman llm set --context' belongs to the
+	// model it was set for, and the form has no field for it.
+	if f.hasSaved && f.saved.Provider == cfg.Provider && f.saved.Model == strings.TrimSpace(cfg.Model) {
+		cfg.ContextTokens = f.saved.ContextTokens
+	}
 	return cfg
 }
 
